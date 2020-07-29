@@ -151,6 +151,11 @@ CrashInfo::GatherCrashInfo(MINIDUMP_TYPE minidumpType)
         // the heap regions are marked RWX instead of just RW.
         if (minidumpType & MiniDumpWithPrivateReadWriteMemory)
         {
+            for (const MemoryRegion& region : m_moduleMappings)
+            {
+                InsertMemoryBackedRegion(region);
+            }
+
             for (const MemoryRegion& region : m_otherMappings)
             {
                 uint32_t permissions = region.Permissions();
