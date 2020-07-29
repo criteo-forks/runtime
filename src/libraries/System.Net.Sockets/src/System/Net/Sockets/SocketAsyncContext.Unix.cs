@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Microsoft.Win32.SafeHandles;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -32,6 +33,8 @@ namespace System.Net.Sockets
 
     internal sealed class SocketAsyncContext
     {
+        private static DynamicThreadPool IOThreadPool = new DynamicThreadPool(Environment.ProcessorCount * 2);
+
         // Cached operation instances for operations commonly repeated on the same socket instance,
         // e.g. async accepts, sends/receives with single and multiple buffers.  More can be
         // added in the future if necessary, at the expense of extra fields here.  With a larger
@@ -250,7 +253,7 @@ namespace System.Net.Sockets
                     // we can't pool the object, as ProcessQueue may still have a reference to it, due to
                     // using a pattern whereby it takes the lock to grab an item, but then releases the lock
                     // to do further processing on the item that's still in the list.
-                    ThreadPool.UnsafeQueueUserWorkItem(o => ((AsyncOperation)o!).InvokeCallback(allowPooling: false), this);
+                    IOThreadPool.QueueWorkItem(s => ((AsyncOperation)s!).InvokeCallback(allowPooling: false), this);
                 }
 
                 Trace("Exit");
@@ -280,7 +283,7 @@ namespace System.Net.Sockets
                 Debug.Assert(Event == null);
 
                 // Async operation.  Process the IO on the threadpool.
-                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+                IOThreadPool.QueueWorkItem(this);
             }
 
             public void Process() => ((IThreadPoolWorkItem)this).Execute();
@@ -2137,5 +2140,195 @@ namespace System.Net.Sockets
         }
 
         public static string IdOf(object o) => o == null ? "(null)" : $"{o.GetType().Name}#{o.GetHashCode():X2}";
+    }
+
+    internal class DynamicThreadPool
+    {
+        private const int WorkerTimeout = 20 * 1000;
+        private const int StartWorkerDelay = 500;
+
+        private readonly ConcurrentQueue<(WaitCallback callback, object state)> _queue;
+        private readonly ConcurrentStack<Worker> _pendingWorkers;
+
+        private long _lastTickCount;
+
+        public DynamicThreadPool(int minSize)
+        {
+            _queue = new ConcurrentQueue<(WaitCallback callback, object state)>();
+            _pendingWorkers = new ConcurrentStack<Worker>();
+
+            new Thread(GateThread) { IsBackground = true }.Start();
+
+            for (int i = 0; i < minSize; i++)
+            {
+                StartWorker(Timeout.Infinite);
+            }
+        }
+
+        public void QueueWorkItem(IThreadPoolWorkItem item)
+        {
+            QueueWorkItem(i => ((IThreadPoolWorkItem)i).Execute(), item);
+        }
+
+        public void QueueWorkItem(WaitCallback callback, object state)
+        {
+            _queue.Enqueue((callback, state));
+
+            while (_pendingWorkers.TryPop(out var worker))
+            {
+                if (worker.TryWakeUp())
+                {
+                    // At least one worker is awake, the action will be dequeued eventually
+                    return;
+                }
+
+                if (_queue.IsEmpty)
+                {
+                    // The work got processed, no need to wake anybody anymore
+                    return;
+                }
+            }
+
+            // No worker, try to start one
+            StartWorkerIfNeeded();
+        }
+
+        private void GateThread()
+        {
+            // There's a subtle race-condition with workers: if an item get enqueued while the worker prepares to sleep, or right after the sleep timed out,
+            // the worker will be in the "Pending workers" queue, yet busy executing some work.
+            // It's possible that this work depends synchronously on another item enqueued to the same threadpool, and this same worker
+            // gets waken up to execute it, leading to a deadlock.
+            // The gate thread is there as a secondary mechanism to make the threadpool grow if it happens.
+            while (true)
+            {
+                Thread.Sleep(StartWorkerDelay);
+                StartWorkerIfNeeded();
+            }
+        }
+
+        private void StartWorkerIfNeeded()
+        {
+            if (_queue.IsEmpty)
+            {
+                return;
+            }
+
+            while (true)
+            {
+                var tickCount = Environment.TickCount64;
+                var lastTickCount = _lastTickCount;
+
+                // Make sure enough time elapsed since we last started a worker
+                if (tickCount - _lastTickCount > StartWorkerDelay)
+                {
+                    if (Interlocked.CompareExchange(ref _lastTickCount, tickCount, lastTickCount) != lastTickCount)
+                    {
+                        // Another thread beat us, retry
+                        continue;
+                    }
+
+                    StartWorker(WorkerTimeout);
+
+                    return;
+                }
+
+                return;
+            }
+        }
+
+        private void StartWorker(int timeout)
+        {
+            new Thread(() => WorkerThread(timeout)) { IsBackground = true }.Start();
+        }
+
+        private void WorkerThread(int timeout)
+        {
+            var worker = new Worker();
+
+            while (true)
+            {
+                if (TryExecuteItem())
+                {
+                    continue;
+                }
+
+                // Nothing left in the queue, prepare to sleep
+                worker.Event.Reset();
+                _pendingWorkers.Push(worker);
+
+                // We need to check the queue again before sleeping, as an item could have been added in the meantime.
+                if (TryExecuteItem())
+                {
+                    continue;
+                }
+
+                if (worker.Event.Wait(timeout))
+                {
+                    continue;
+                }
+
+                // The wait timed out. Scale down the threadpool
+                if (worker.TryExit())
+                {
+                    return;
+                }
+
+                // If we got there, it means we lost the race condition and got signaled as we tried to exit. Resume the loop.
+            }
+        }
+
+        private bool TryExecuteItem()
+        {
+            if (_queue.TryDequeue(out var item))
+            {
+                try
+                {
+                    item.callback(item.state);
+                }
+                catch (Exception)
+                {
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        internal class Worker
+        {
+            public readonly ManualResetEventSlim Event = new ManualResetEventSlim(false);
+            private bool _hasExited;
+
+            public bool TryWakeUp()
+            {
+                lock (Event)
+                {
+                    if (!_hasExited)
+                    {
+                        Event.Set();
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            public bool TryExit()
+            {
+                lock (Event)
+                {
+                    if (!Event.IsSet)
+                    {
+                        _hasExited = true;
+                        Event.Dispose();
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
     }
 }
