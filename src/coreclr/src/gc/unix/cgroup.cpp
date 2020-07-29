@@ -53,6 +53,7 @@ Abstract:
 #define CGROUP1_CFS_QUOTA_FILENAME "/cpu.cfs_quota_us"
 #define CGROUP1_CFS_PERIOD_FILENAME "/cpu.cfs_period_us"
 #define CGROUP2_CPU_MAX_FILENAME "/cpu.max"
+#define MEM_STAT_FILENAME "/memory.stat"
 
 extern bool ReadMemoryValueFromFile(const char* filename, uint64_t* val);
 
@@ -94,17 +95,43 @@ public:
 
     static bool GetPhysicalMemoryUsage(size_t *val)
     {
-        if (s_cgroup_version == 0)
-            return false;
-        else if (s_cgroup_version == 1)
-            return GetCGroupMemoryUsage(val, CGROUP1_MEMORY_USAGE_FILENAME);
-        else if (s_cgroup_version == 2)
-            return GetCGroupMemoryUsage(val, CGROUP2_MEMORY_USAGE_FILENAME);
-        else
+        char *mem_stat_filename = nullptr;
+        bool result = false;
+
+        if (s_memory_cgroup_path == nullptr)
+            return result;
+
+        size_t len = strlen(s_memory_cgroup_path);
+        len += strlen(MEM_STAT_FILENAME);
+        mem_stat_filename = (char*)malloc(len+1);
+        if (mem_stat_filename == nullptr)
+            return result;
+
+        strcpy(mem_stat_filename, s_memory_cgroup_path);
+        strcat(mem_stat_filename, MEM_STAT_FILENAME);
+
+        FILE* file = fopen(mem_stat_filename, "r");
+        if (file != nullptr)
         {
-            assert(!"Unknown cgroup version.");
-            return false;
+            char* line = nullptr;
+            size_t linelen;
+            while (getline(&line, &linelen, file) != -1)
+            {
+                size_t available;
+                int fieldsParsed = sscanf(line, "rss %zu" , &available);
+                if (fieldsParsed >= 1)
+                {
+                    *val = available;
+                    result = true;
+                    break;
+                }
+            }
+            free(line);
+            fclose(file);
         }
+
+        free(mem_stat_filename);
+        return result;
     }
 
     static bool GetCpuLimit(uint32_t *val)
