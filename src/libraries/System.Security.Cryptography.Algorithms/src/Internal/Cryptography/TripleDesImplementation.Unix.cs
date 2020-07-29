@@ -27,6 +27,10 @@ namespace Internal.Cryptography
                 case CipherMode.ECB:
                     algorithm = Interop.Crypto.EvpDes3Ecb();
                     break;
+                case CipherMode.CFB:
+                    algorithm = Interop.Crypto.EvpDes3Cfb();
+                    break;
+
                 default:
                     throw new NotSupportedException();
             }

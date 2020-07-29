@@ -15,7 +15,8 @@ namespace Internal.Cryptography
             byte[] key,
             byte[]? iv,
             int blockSize,
-            bool encrypting)
+            bool encrypting,
+            int FeedbackSize)
         {
             SafeAlgorithmHandle algorithm = AesBCryptModes.GetSharedHandle(cipherMode);
 
