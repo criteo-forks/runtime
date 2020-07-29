@@ -312,14 +312,23 @@ void SSL_get0_alpn_selected(const SSL* ssl, const unsigned char** protocol, unsi
     REQUIRED_FUNCTION(EVP_aes_128_ccm) \
     REQUIRED_FUNCTION(EVP_aes_128_ecb) \
     REQUIRED_FUNCTION(EVP_aes_128_gcm) \
+    REQUIRED_FUNCTION(EVP_aes_128_cfb1) \
+    REQUIRED_FUNCTION(EVP_aes_128_cfb8) \
+    REQUIRED_FUNCTION(EVP_aes_128_cfb128) \
     REQUIRED_FUNCTION(EVP_aes_192_cbc) \
     REQUIRED_FUNCTION(EVP_aes_192_ccm) \
     REQUIRED_FUNCTION(EVP_aes_192_ecb) \
     REQUIRED_FUNCTION(EVP_aes_192_gcm) \
+    REQUIRED_FUNCTION(EVP_aes_192_cfb1) \
+    REQUIRED_FUNCTION(EVP_aes_192_cfb8) \
+    REQUIRED_FUNCTION(EVP_aes_192_cfb128) \
     REQUIRED_FUNCTION(EVP_aes_256_cbc) \
     REQUIRED_FUNCTION(EVP_aes_256_ccm) \
     REQUIRED_FUNCTION(EVP_aes_256_ecb) \
     REQUIRED_FUNCTION(EVP_aes_256_gcm) \
+    REQUIRED_FUNCTION(EVP_aes_256_cfb1) \
+    REQUIRED_FUNCTION(EVP_aes_256_cfb8) \
+    REQUIRED_FUNCTION(EVP_aes_256_cfb128) \
     LEGACY_FUNCTION(EVP_CIPHER_CTX_cleanup) \
     REQUIRED_FUNCTION(EVP_CIPHER_CTX_ctrl) \
     FALLBACK_FUNCTION(EVP_CIPHER_CTX_free) \
@@ -335,6 +344,7 @@ void SSL_get0_alpn_selected(const SSL* ssl, const unsigned char** protocol, unsi
     REQUIRED_FUNCTION(EVP_des_ecb) \
     REQUIRED_FUNCTION(EVP_des_ede3) \
     REQUIRED_FUNCTION(EVP_des_ede3_cbc) \
+    REQUIRED_FUNCTION(EVP_des_ede3_cfb8) \
     REQUIRED_FUNCTION(EVP_DigestFinal_ex) \
     REQUIRED_FUNCTION(EVP_DigestInit_ex) \
     REQUIRED_FUNCTION(EVP_DigestUpdate) \
@@ -702,14 +712,23 @@ FOR_ALL_OPENSSL_FUNCTIONS
 #define EVP_aes_128_ecb EVP_aes_128_ecb_ptr
 #define EVP_aes_128_gcm EVP_aes_128_gcm_ptr
 #define EVP_aes_128_ccm EVP_aes_128_ccm_ptr
+#define EVP_aes_128_cfb1 EVP_aes_128_cfb1_ptr
+#define EVP_aes_128_cfb8 EVP_aes_128_cfb8_ptr
+#define EVP_aes_128_cfb128 EVP_aes_128_cfb128_ptr
 #define EVP_aes_192_cbc EVP_aes_192_cbc_ptr
 #define EVP_aes_192_ecb EVP_aes_192_ecb_ptr
 #define EVP_aes_192_gcm EVP_aes_192_gcm_ptr
 #define EVP_aes_192_ccm EVP_aes_192_ccm_ptr
+#define EVP_aes_192_cfb1 EVP_aes_192_cfb1_ptr
+#define EVP_aes_192_cfb8 EVP_aes_192_cfb8_ptr
+#define EVP_aes_192_cfb128 EVP_aes_192_cfb128_ptr
 #define EVP_aes_256_cbc EVP_aes_256_cbc_ptr
 #define EVP_aes_256_ecb EVP_aes_256_ecb_ptr
 #define EVP_aes_256_gcm EVP_aes_256_gcm_ptr
 #define EVP_aes_256_ccm EVP_aes_256_ccm_ptr
+#define EVP_aes_256_cfb1 EVP_aes_256_cfb1_ptr
+#define EVP_aes_256_cfb8 EVP_aes_256_cfb8_ptr
+#define EVP_aes_256_cfb128 EVP_aes_256_cfb128_ptr
 #define EVP_CIPHER_CTX_cleanup EVP_CIPHER_CTX_cleanup_ptr
 #define EVP_CIPHER_CTX_ctrl EVP_CIPHER_CTX_ctrl_ptr
 #define EVP_CIPHER_CTX_free EVP_CIPHER_CTX_free_ptr
@@ -724,6 +743,7 @@ FOR_ALL_OPENSSL_FUNCTIONS
 #define EVP_des_cbc EVP_des_cbc_ptr
 #define EVP_des_ecb EVP_des_ecb_ptr
 #define EVP_des_ede3 EVP_des_ede3_ptr
+#define EVP_des_ede3_cfb8 EVP_des_ede3_cfb8_ptr
 #define EVP_des_ede3_cbc EVP_des_ede3_cbc_ptr
 #define EVP_DigestFinal_ex EVP_DigestFinal_ex_ptr
 #define EVP_DigestInit_ex EVP_DigestInit_ex_ptr
