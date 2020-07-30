@@ -13,7 +13,8 @@ namespace Internal.Cryptography
             byte[] key,
             byte[]? iv,
             int blockSize,
-            bool encrypting)
+            bool encrypting,
+            int FeedbackSize)
         {
             BasicSymmetricCipher cipher = new AppleCCCryptor(
                 Interop.AppleCrypto.PAL_SymmetricAlgorithm.AES,
