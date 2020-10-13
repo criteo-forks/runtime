@@ -37,7 +37,6 @@ private:
     // its own data, while at the same time, ensuring that when a thread is destroyed,
     // we keep the buffers around without having to perform any migration or
     // book-keeping.
-    SList<SListElem<EventPipeThreadSessionState*>> *m_pThreadSessionStateList;
 
     // The total allocation size of buffers under management.
     size_t m_sizeOfAllBuffers;
@@ -59,7 +58,12 @@ private:
     SList<EventPipeSequencePoint> m_sequencePoints;
 
     // Lock to protect access to the per-thread buffer list and total allocation size.
-    SpinLock m_lock;
+    //SpinLock m_lock;
+
+    SpinLock m_sequencePointLock;
+    SpinLock m_bufferAllocationLock;
+    SList<SListElem<EventPipeThreadSessionState*>>* m_pThreadSessionStates[53];
+    SpinLock m_pThreadSessionStatesLocks[53];
 
     // Event for synchronizing real time reading
     CLREvent m_waitEvent;
@@ -84,6 +88,8 @@ private:
     // This function will store the buffer in the thread's buffer list for future use and also return it here.
     // A NULL return value means that a buffer could not be allocated.
     EventPipeBuffer* AllocateBufferForThread(EventPipeThreadSessionState* pSessionState, unsigned int requestSize, BOOL & writeSuspended);
+
+    unsigned int TryAllocatingBuffer(unsigned int requestSize, EventPipeBufferList* pBufferList, EventPipeThreadSessionState* pSessionState, EventPipeBuffer** pBuffer);
 
     // Add a buffer to the thread buffer list.
     void AddBufferToThreadBufferList(EventPipeBufferList *pThreadBuffers, EventPipeBuffer *pBuffer);
@@ -190,8 +196,9 @@ public:
     CLREvent *GetWaitEvent();
 
 #ifdef _DEBUG
-    bool EnsureConsistency();
-    bool IsLockOwnedByCurrentThread();
+    bool EnsureConsistency(SList<SListElem<EventPipeThreadSessionState*>>* const sessionStateList, int i);
+    //bool IsLockOwnedByCurrentThread();
+    bool IsLockOwnedForThread(EventPipeThread* pThread);
 #endif // _DEBUG
 };
 
@@ -243,16 +250,13 @@ public:
     // Read/Write the last read sequence number
     unsigned int GetLastReadSequenceNumber();
     void SetLastReadSequenceNumber(unsigned int sequenceNumber);
+    //SpinLock m_lock;
 
 #ifdef _DEBUG
     // Validate the consistency of the list.
     // This function will assert if the list is in an inconsistent state.
     bool EnsureConsistency();
 #endif // _DEBUG
-
-#ifdef DEBUG
-    bool IsBufferManagerLockOwnedByCurrentThread();
-#endif // DEBUG
 };
 
 

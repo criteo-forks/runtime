@@ -56,14 +56,14 @@ void EventPipeThreadSessionState::SetWriteBuffer(EventPipeBuffer *pNewBuffer)
 EventPipeBufferList *EventPipeThreadSessionState::GetBufferList()
 {
     LIMITED_METHOD_CONTRACT;
-    _ASSERTE(m_pBufferManager->IsLockOwnedByCurrentThread());
+    _ASSERTE(m_pBufferManager->IsLockOwnedForThread(m_pThread));
     return m_pBufferList;
 }
 
 void EventPipeThreadSessionState::SetBufferList(EventPipeBufferList *pNewBufferList)
 {
     LIMITED_METHOD_CONTRACT;
-    _ASSERTE(m_pBufferManager->IsLockOwnedByCurrentThread());
+    _ASSERTE(m_pBufferManager->IsLockOwnedForThread(m_pThread));
     m_pBufferList = pNewBufferList;
 }
 
