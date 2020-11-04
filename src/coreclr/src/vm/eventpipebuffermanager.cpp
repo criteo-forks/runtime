@@ -603,7 +603,7 @@ void EventPipeBufferManager::WriteAllBuffersToFileV4(EventPipeFile *pFile, LARGE
     {
         while (true) // loop across events within a sequence point boundary
         {
-            // pick the thread that has the oldest event
+            // pick the thread that has the oldest event and return session states we need to deallocate
             MoveNextEventAnyThread(curTimestampBoundary);
             if (GetCurrentEvent() == nullptr)
             {
@@ -768,23 +768,53 @@ void EventPipeBufferManager::MoveNextEventAnyThread(LARGE_INTEGER stopTimeStamp)
     // We need to do this in two steps because we can't hold m_lock and EventPipeThread::m_lock
     // at the same time.
 
-    // Step 1 - while holding m_lock get the oldest buffer from each thread
+    // Step 1 - while holding m_lock get the oldest buffer from each thread and filter out
+    // session states acciated to dead thread.
     CQuickArrayList<EventPipeBuffer *> bufferList;
     CQuickArrayList<EventPipeBufferList *> bufferListList;
+    CQuickArrayList<EventPipeThreadSessionState*> sessionStateListToCleanup;
     {
         SpinLockHolder _slh(&m_lock);
-        SListElem<EventPipeThreadSessionState *> *pElem = m_pThreadSessionStateList->GetHead();
-        while (pElem != NULL)
+
+        // Insert this guard element with nullptr, so we can go through the list,
+        // filtering it until we reach our guard.
+        // safe to use nullptr as value, since this m_pThreadSessionStateList does
+        // contain elements with non-null value.
+        auto guard = SListElem<EventPipeThreadSessionState*>(nullptr);
+        m_pThreadSessionStateList->InsertTail(&guard);
+
+        SListElem<EventPipeThreadSessionState *> *pElem = m_pThreadSessionStateList->RemoveHead();
+        // loop until we got our guard item
+        while (pElem->GetValue() != nullptr)
         {
-            EventPipeBufferList *pBufferList = pElem->GetValue()->GetBufferList();
+            // we need to set the m_pNext to nullptr, otherwise if we insert it back,
+            // it will still point to non-null next. The m_pNext of the last element must
+            // be set to nullptr otherwise we could introduce a cycle.
+            pElem->m_Link.m_pNext = nullptr;
+
+            auto currentSessionState = pElem->GetValue();
+            EventPipeBufferList *pBufferList = currentSessionState->GetBufferList();
             EventPipeBuffer *pBuffer = pBufferList->GetHead();
-            if (pBuffer != nullptr &&
-                pBuffer->GetCreationTimeStamp().QuadPart < stopTimeStamp.QuadPart)
+            EventPipeThread *thread = currentSessionState->GetThread();
+            if (thread->IsNativeThreadDead() && pBuffer == nullptr)
             {
-                bufferListList.Push(pBufferList);
-                bufferList.Push(pBuffer);
+                sessionStateListToCleanup.Push(currentSessionState);
+                currentSessionState->SetBufferList(nullptr);
+
+                delete pBufferList;
+                delete pElem;
             }
-            pElem = m_pThreadSessionStateList->GetNext(pElem);
+            else
+            {
+                if (pBuffer != nullptr &&
+                    pBuffer->GetCreationTimeStamp().QuadPart < stopTimeStamp.QuadPart)
+                {
+                    bufferListList.Push(pBufferList);
+                    bufferList.Push(pBuffer);
+                }
+                m_pThreadSessionStateList->InsertTail(pElem);
+            }
+            pElem = m_pThreadSessionStateList->RemoveHead();
         }
     }
 
@@ -814,6 +844,20 @@ void EventPipeBufferManager::MoveNextEventAnyThread(LARGE_INTEGER stopTimeStamp)
                 m_pCurrentBufferList = pBufferList;
                 curOldestTime = *(m_pCurrentEvent->GetTimeStamp());
             }
+        }
+    }
+
+    // Step 3 - Delete session states associated to dead thread and don't have buffers anymore
+    for (size_t i = 0; i < sessionStateListToCleanup.Size(); i++)
+    {
+        auto currentSessionState = sessionStateListToCleanup[i];
+        auto thread = currentSessionState->GetThread();
+
+        // The strong reference from session state -> thread might be the very last reference
+        // We need to ensure the thread doesn't die until we can release the lock
+        EventPipeThreadHolder pThread = currentSessionState->GetThread();
+        {
+            thread->DeleteSessionState(currentSessionState->GetSession());
         }
     }
 }

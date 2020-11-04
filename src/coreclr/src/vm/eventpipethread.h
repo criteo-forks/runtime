@@ -84,7 +84,28 @@ public:
 
 class EventPipeThread
 {
-    static thread_local EventPipeThreadHolder gCurrentEventPipeThreadHolder;
+    class EventPipeThreadWrapper : public EventPipeThreadHolder
+    {
+        typedef EventPipeThreadHolder BaseType;
+
+    public:
+        EventPipeThreadWrapper() : BaseType()
+        {}
+
+        ~EventPipeThreadWrapper()
+        {
+            if (this->m_value != nullptr)
+                this->m_value->m_nativeThreadIsDead = true;
+        }
+
+        EventPipeThreadWrapper& operator=(EventPipeThread* const& value)
+        {
+            BaseType::operator=(value);
+            return *this;
+        }
+    };
+
+    static thread_local EventPipeThreadWrapper gCurrentEventPipeThreadHolder;
 
     static SpinLock s_threadsLock;
     static SList<SListElem<EventPipeThread *>> s_pThreads;
@@ -121,6 +142,8 @@ class EventPipeThread
 
     // Use Get/GetOrCreate instead
     EventPipeThread();
+
+    bool m_nativeThreadIsDead;
 
 public:
     static void Initialize();
@@ -177,8 +200,12 @@ public:
         LIMITED_METHOD_CONTRACT;
         return m_writingEventInProgress.Load();
     }
-};
 
+    bool IsNativeThreadDead() const
+    {
+        return m_nativeThreadIsDead;
+    }
+};
 #endif // FEATURE_PERFTRACING
 
 #endif // __EVENTPIPE_THREAD_H__

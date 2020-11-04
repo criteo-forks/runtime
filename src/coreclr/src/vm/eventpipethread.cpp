@@ -99,7 +99,7 @@ void AcquireEventPipeThreadRef(EventPipeThread *pThread)
     pThread->AddRef();
 }
 
-thread_local EventPipeThreadHolder EventPipeThread::gCurrentEventPipeThreadHolder;
+thread_local EventPipeThread::EventPipeThreadWrapper EventPipeThread::gCurrentEventPipeThreadHolder;
 
 SpinLock EventPipeThread::s_threadsLock;
 SList<SListElem<EventPipeThread *>> EventPipeThread::s_pThreads;
@@ -116,6 +116,7 @@ EventPipeThread::EventPipeThread()
 
     m_lock.Init(LOCK_TYPE_DEFAULT);
     m_refCount = 0;
+    m_nativeThreadIsDead = false;
 
 #ifdef TARGET_UNIX
     m_osThreadId = ::PAL_GetCurrentOSThreadId();
@@ -258,7 +259,7 @@ void EventPipeThread::DeleteSessionState(EventPipeSession* pSession)
 {
     LIMITED_METHOD_CONTRACT;
     _ASSERTE(pSession != nullptr);
-    _ASSERTE(IsLockOwnedByCurrentThread());
+    _ASSERTE(IsLockOwnedByCurrentThread() || IsNativeThreadDead());
 
     unsigned int index = pSession->GetIndex();
     _ASSERTE(index < EventPipe::MaxNumberOfSessions);
