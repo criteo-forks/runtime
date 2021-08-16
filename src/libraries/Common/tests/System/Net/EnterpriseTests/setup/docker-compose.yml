@@ -39,6 +39,7 @@ services:
     hostname: altweb
     domainname: linux.contoso.com
     dns_search: linux.contoso.com
+    command: "-DALTPORT -DALTSPN"
     volumes:
       - shared-volume:/SHARED
     networks:
