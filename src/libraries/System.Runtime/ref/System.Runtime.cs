@@ -4613,6 +4613,7 @@ namespace System
         public static readonly string SchemeDelimiter;
         public static readonly string UriSchemeFile;
         public static readonly string UriSchemeFtp;
+        public static readonly string UriSchemeFtps;
         public static readonly string UriSchemeGopher;
         public static readonly string UriSchemeHttp;
         public static readonly string UriSchemeHttps;
@@ -4621,13 +4622,19 @@ namespace System
         public static readonly string UriSchemeNetTcp;
         public static readonly string UriSchemeNews;
         public static readonly string UriSchemeNntp;
+        public static readonly string UriSchemeSftp;
+        public static readonly string UriSchemeSsh;
+        public static readonly string UriSchemeTelnet;
+        public static readonly string UriSchemeWs;
+        public static readonly string UriSchemeWss;
         protected Uri(System.Runtime.Serialization.SerializationInfo serializationInfo, System.Runtime.Serialization.StreamingContext streamingContext) { }
         public Uri(string uriString) { }
-        [System.ObsoleteAttribute("The constructor has been deprecated. Please use new Uri(string). The dontEscape parameter is deprecated and is always false. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("This constructor has been deprecated; the dontEscape parameter is always false. Use Uri(string) instead.")]
         public Uri(string uriString, bool dontEscape) { }
+        public Uri(string uriString, in System.UriCreationOptions creationOptions) { }
         public Uri(string uriString, System.UriKind uriKind) { }
         public Uri(System.Uri baseUri, string? relativeUri) { }
-        [System.ObsoleteAttribute("The constructor has been deprecated. Please new Uri(Uri, string). The dontEscape parameter is deprecated and is always false. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("This constructor has been deprecated; the dontEscape parameter is always false. Use Uri(Uri, string) instead.")]
         public Uri(System.Uri baseUri, string? relativeUri, bool dontEscape) { }
         public Uri(System.Uri baseUri, System.Uri relativeUri) { }
         public string AbsolutePath { get { throw null; } }
@@ -4652,19 +4659,20 @@ namespace System
         public string[] Segments { get { throw null; } }
         public bool UserEscaped { get { throw null; } }
         public string UserInfo { get { throw null; } }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.Canonicalize has been deprecated and is not supported.")]
         protected virtual void Canonicalize() { }
         public static System.UriHostNameType CheckHostName(string? name) { throw null; }
-        public static bool CheckSchemeName(string? schemeName) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        public static bool CheckSchemeName([System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] string? schemeName) { throw null; }
+        [System.ObsoleteAttribute("Uri.CheckSecurity has been deprecated and is not supported.")]
         protected virtual void CheckSecurity() { }
         public static int Compare(System.Uri? uri1, System.Uri? uri2, System.UriComponents partsToCompare, System.UriFormat compareFormat, System.StringComparison comparisonType) { throw null; }
-        public override bool Equals(object? comparand) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        public override bool Equals([System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] object? comparand) { throw null; }
+        [System.ObsoleteAttribute("Uri.Escape has been deprecated and is not supported.")]
         protected virtual void Escape() { }
         public static string EscapeDataString(string stringToEscape) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. Please use GetComponents() or static EscapeUriString() to escape a Uri component or a string. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.EscapeString has been deprecated. Use GetComponents() or static EscapeDataString() to escape a Uri component or a string.")]
         protected static string EscapeString(string? str) { throw null; }
+
         public static string EscapeUriString(string stringToEscape) { throw null; }
         public static int FromHex(char digit) { throw null; }
         public string GetComponents(System.UriComponents components, System.UriFormat format) { throw null; }
@@ -4673,30 +4681,31 @@ namespace System
         protected void GetObjectData(System.Runtime.Serialization.SerializationInfo serializationInfo, System.Runtime.Serialization.StreamingContext streamingContext) { }
         public static string HexEscape(char character) { throw null; }
         public static char HexUnescape(string pattern, ref int index) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.IsBadFileSystemCharacter has been deprecated and is not supported.")]
         protected virtual bool IsBadFileSystemCharacter(char character) { throw null; }
         public bool IsBaseOf(System.Uri uri) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.IsExcludedCharacter has been deprecated and is not supported.")]
         protected static bool IsExcludedCharacter(char character) { throw null; }
         public static bool IsHexDigit(char character) { throw null; }
         public static bool IsHexEncoding(string pattern, int index) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.IsReservedCharacter has been deprecated and is not supported.")]
         protected virtual bool IsReservedCharacter(char character) { throw null; }
         public bool IsWellFormedOriginalString() { throw null; }
         public static bool IsWellFormedUriString([System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] string? uriString, System.UriKind uriKind) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. Please use MakeRelativeUri(Uri uri). https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.MakeRelative has been deprecated. Use MakeRelativeUri(Uri uri).")]
         public string MakeRelative(System.Uri toUri) { throw null; }
         public System.Uri MakeRelativeUri(System.Uri uri) { throw null; }
         public static bool operator ==(System.Uri? uri1, System.Uri? uri2) { throw null; }
         public static bool operator !=(System.Uri? uri1, System.Uri? uri2) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. It is not used by the system. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.Parse has been deprecated and is not supported.")]
         protected virtual void Parse() { }
         void System.Runtime.Serialization.ISerializable.GetObjectData(System.Runtime.Serialization.SerializationInfo serializationInfo, System.Runtime.Serialization.StreamingContext streamingContext) { }
         public override string ToString() { throw null; }
-        public static bool TryCreate(string? uriString, System.UriKind uriKind, [System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] out System.Uri? result) { throw null; }
+        public static bool TryCreate([System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] string? uriString, in System.UriCreationOptions creationOptions, [System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] out System.Uri? result) { throw null; }
+        public static bool TryCreate([System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] string? uriString, System.UriKind uriKind, [System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] out System.Uri? result) { throw null; }
         public static bool TryCreate(System.Uri? baseUri, string? relativeUri, [System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] out System.Uri? result) { throw null; }
         public static bool TryCreate(System.Uri? baseUri, System.Uri? relativeUri, [System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] out System.Uri? result) { throw null; }
-        [System.ObsoleteAttribute("The method has been deprecated. Please use GetComponents() or static UnescapeDataString() to unescape a Uri component or a string. https://go.microsoft.com/fwlink/?linkid=14202")]
+        [System.ObsoleteAttribute("Uri.Unescape has been deprecated. Use GetComponents() or Uri.UnescapeDataString() to unescape a Uri component or a string.")]
         protected virtual string Unescape(string path) { throw null; }
         public static string UnescapeDataString(string stringToUnescape) { throw null; }
     }
@@ -4725,9 +4734,13 @@ namespace System
         public System.Uri Uri { get { throw null; } }
         [System.Diagnostics.CodeAnalysis.AllowNullAttribute]
         public string UserName { get { throw null; } set { } }
-        public override bool Equals(object? rparam) { throw null; }
+        public override bool Equals([System.Diagnostics.CodeAnalysis.NotNullWhenAttribute(true)] object? rparam) { throw null; }
         public override int GetHashCode() { throw null; }
         public override string ToString() { throw null; }
+    }
+    public partial struct UriCreationOptions
+    {
+        public bool DangerousDisablePathAndQueryCanonicalization { readonly get { throw null; } set { } }
     }
     [System.FlagsAttribute]
     public enum UriComponents

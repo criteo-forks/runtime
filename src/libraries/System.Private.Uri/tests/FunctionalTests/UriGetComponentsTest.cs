@@ -28,7 +28,6 @@ namespace System.PrivateUri.Tests
         public void GetComponents_UnknownScheme_ComponentsUnaffected()
         {
             Uri testUri;
-
             testUri = new Uri("eb://00000000000000000000000/dir1/dir2?query=expression#fragment");
             Assert.Equal("00000000000000000000000", testUri.Authority);
             Assert.Equal("eb", testUri.Scheme);
@@ -63,9 +62,9 @@ namespace System.PrivateUri.Tests
 
             // Known limitation: port 0 is ignored.
             testUri = new Uri("cbd://127.00.1.2:0000");
-            Assert.Equal("127.00.1.2", testUri.Authority);
+            Assert.Equal("127.00.1.2:0", testUri.Authority);
             testUri = new Uri("cbd://127.00.1.2:0");
-            Assert.Equal("127.00.1.2", testUri.Authority);
+            Assert.Equal("127.00.1.2:0", testUri.Authority);
 
             testUri = new Uri("eb://[0000::01:123.32.123.23]/dir");
             Assert.Equal("[::1:7b20:7b17]", testUri.Authority);
