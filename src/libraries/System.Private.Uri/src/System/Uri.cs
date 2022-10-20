@@ -364,9 +364,6 @@ namespace System
         //
         public Uri(string uriString)
         {
-            var isWindows = IsWindowsSystem;
-            if (!isWindows)
-                throw new Exception("not windows URI!!");
             if (uriString is null)
                 throw new ArgumentNullException(nameof(uriString));
 
