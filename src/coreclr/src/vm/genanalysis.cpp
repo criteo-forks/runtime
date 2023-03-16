@@ -75,6 +75,7 @@ uint32_t gcGenAnalysisBufferMB = 0;
         EventPipeSessionType::File,
         EventPipeSerializationFormat::NetTraceV4,
         false,
+        true,
         nullptr
     );
     if (gcGenAnalysisEventPipeSessionId > 0)

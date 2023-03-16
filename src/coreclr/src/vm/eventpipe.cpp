@@ -233,6 +233,7 @@ void EventPipe::EnableViaEnvironmentVariables()
             EventPipeSessionType::File,
             EventPipeSerializationFormat::NetTraceV4,
             true,
+            true,
             nullptr
         );
         EventPipe::StartStreaming(sessionID);
@@ -304,6 +305,7 @@ EventPipeSessionID EventPipe::Enable(
     EventPipeSessionType sessionType,
     EventPipeSerializationFormat format,
     const bool rundownRequested,
+    const bool stacksRequested,
     IpcStream *const pStream,
     EventPipeSessionSynchronousCallback callback)
 {
@@ -343,7 +345,8 @@ EventPipeSessionID EventPipe::Enable(
             circularBufferSizeInMB,
             pProviders,
             numProviders,
-            callback);
+            callback,
+            stacksRequested);
 
         const bool fSuccess = EnableInternal(pSession, pEventPipeProviderCallbackDataQueue);
         if (fSuccess)

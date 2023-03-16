@@ -63,6 +63,7 @@ public:
         EventPipeSessionType sessionType,
         EventPipeSerializationFormat format,
         const bool rundownRequested,
+        const bool stacksRequested,
         IpcStream *const pStream,
         EventPipeSessionSynchronousCallback callback = nullptr);
 

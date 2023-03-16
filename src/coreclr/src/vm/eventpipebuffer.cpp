@@ -94,7 +94,7 @@ bool EventPipeBuffer::WriteEvent(Thread *pThread, EventPipeSession &session, Eve
 
         StackContents s;
         memset((void *)&s, 0, sizeof(s));
-        if (event.NeedStack() && !session.RundownEnabled() && pStack == NULL)
+        if (event.NeedStack() && session.StacksRequested() && !session.RundownEnabled() && pStack == NULL)
         {
             EventPipe::WalkManagedStackForCurrentThread(s);
             pStack = &s;
