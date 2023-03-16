@@ -62,7 +62,7 @@ EventPipeEventInstance::EventPipeEventInstance(
 
 void EventPipeEventInstance::EnsureStack(const EventPipeSession &session)
 {
-    if (m_pEvent->NeedStack() && !session.RundownEnabled())
+    if (m_pEvent->NeedStack() && session.StacksRequested() && !session.RundownEnabled())
     {
         EventPipe::WalkManagedStackForCurrentThread(m_stackContents);
     }

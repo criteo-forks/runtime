@@ -7078,6 +7078,7 @@ HRESULT ProfToEEInterfaceImpl::EventPipeStartSession(
                                              EventPipeSessionType::Synchronous,
                                              EventPipeSerializationFormat::NetTraceV4,
                                              requestRundown,
+                                             true, // stacksRequested
                                              NULL,
                                              &ProfToEEInterfaceImpl::EventPipeCallbackHelper);
         if (sessionID != 0)

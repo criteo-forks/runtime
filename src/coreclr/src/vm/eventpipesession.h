@@ -70,6 +70,9 @@ private:
     // For synchronous sessions
     EventPipeSessionSynchronousCallback m_synchronousCallback;
 
+    // Overrides stack collection on session level 
+    const bool m_stacksRequested;
+
     // Start date and time in UTC.
     FILETIME m_sessionStartTime;
 
@@ -121,7 +124,8 @@ public:
         uint32_t circularBufferSizeInMB,
         const EventPipeProviderConfiguration *pProviders,
         uint32_t numProviders,
-        EventPipeSessionSynchronousCallback callback = nullptr);
+        EventPipeSessionSynchronousCallback callback = nullptr,
+        bool stacksRequested = true);
 
     ~EventPipeSession();
 
@@ -167,6 +171,12 @@ public:
     {
         LIMITED_METHOD_CONTRACT;
         return m_format;
+    }
+
+    bool StacksRequested() const
+    {
+        LIMITED_METHOD_CONTRACT;
+        return m_stacksRequested;
     }
 
     // Get whether rundown was requested by the client.

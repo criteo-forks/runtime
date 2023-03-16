@@ -22,14 +22,16 @@ EventPipeSession::EventPipeSession(
     uint32_t circularBufferSizeInMB,
     const EventPipeProviderConfiguration *pProviders,
     uint32_t numProviders,
-    EventPipeSessionSynchronousCallback callback) : m_index(index),
+    EventPipeSessionSynchronousCallback callback,
+    bool stacksRequested) : m_index(index),
                                                     m_pProviderList(new EventPipeSessionProviderList(pProviders, numProviders)),
                                                     m_pBufferManager(nullptr),
                                                     m_rundownEnabled(false),
                                                     m_SessionType(sessionType),
                                                     m_format(format),
                                                     m_rundownRequested(rundownSwitch),
-                                                    m_synchronousCallback(callback)
+                                                    m_synchronousCallback(callback),
+                                                    m_stacksRequested(stacksRequested)
 {
     CONTRACTL
     {

@@ -362,7 +362,7 @@ bool EventPipeBufferManager::WriteEvent(Thread *pThread, EventPipeSession &sessi
     }
 
     StackContents stackContents;
-    if (pStack == NULL && event.NeedStack() && !session.RundownEnabled())
+    if (pStack == NULL && event.NeedStack() && session.StacksRequested() && !session.RundownEnabled())
     {
         EventPipe::WalkManagedStackForCurrentThread(stackContents);
         pStack = &stackContents;

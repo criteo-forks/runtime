@@ -46,6 +46,7 @@ UINT64 QCALLTYPE EventPipeInternal::Enable(
             outputFile != NULL ? EventPipeSessionType::File : EventPipeSessionType::Listener,
             format,
             true,
+            true,
             nullptr);
         EventPipe::StartStreaming(sessionID);
     }
