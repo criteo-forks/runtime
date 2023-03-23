@@ -132,6 +132,7 @@ ep_session_alloc (
 	EventPipeSessionType session_type,
 	EventPipeSerializationFormat format,
 	bool rundown_requested,
+	bool stacks_requested,
 	uint32_t circular_buffer_size_in_mb,
 	const EventPipeProviderConfiguration *providers,
 	uint32_t providers_len,
@@ -162,6 +163,7 @@ ep_session_alloc (
 	instance->session_type = session_type;
 	instance->format = format;
 	instance->rundown_requested = rundown_requested;
+	instance->stacks_requested = stacks_requested;
 	instance->synchronous_callback = sync_callback;
 	instance->callback_additional_data = callback_additional_data;
 
