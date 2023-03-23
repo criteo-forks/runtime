@@ -91,6 +91,7 @@ bool gcGenAnalysisDump = false;
         EP_SESSION_TYPE_FILE,
         EP_SERIALIZATION_FORMAT_NETTRACE_V4,
         false,
+        true,
         nullptr,
         nullptr,
         nullptr
