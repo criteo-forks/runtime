@@ -41,6 +41,7 @@ UINT64 QCALLTYPE EventPipeInternal::Enable(
             outputFile != NULL ? EP_SESSION_TYPE_FILE : EP_SESSION_TYPE_LISTENER,
             format,
             true,
+            true,
             nullptr,
             nullptr,
             nullptr);

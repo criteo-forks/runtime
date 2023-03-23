@@ -97,7 +97,7 @@ ep_buffer_write_event (
 	EventPipeStackContents stack_contents;
 	EventPipeStackContents *current_stack_contents;
 	current_stack_contents = ep_stack_contents_init (&stack_contents);
-	if (stack == NULL && ep_event_get_need_stack (ep_event) && !ep_session_get_rundown_enabled (session)) {
+	if (stack == NULL && ep_event_get_need_stack (ep_event) && ep_session_get_stacks_requested (session) && !ep_session_get_rundown_enabled (session)) {
 		ep_walk_managed_stack_for_current_thread (current_stack_contents);
 		stack = current_stack_contents;
 	}
