@@ -186,6 +186,12 @@ namespace System.Diagnostics
             /// </summary>
             public const EventKeywords Events = (EventKeywords)0x2;
 
+            /// <summary>
+            /// Logs every time Activity.Current changes on any thread.
+            /// This allows to correlate any other event (like a CPU sample or an AllocationTick) to the activity it belongs to
+            /// </summary>
+            public const EventKeywords ActivityChange = (EventKeywords)0x4;
+
             // Some ETW logic does not support passing arguments to the EventProvider. To get around
             // this in common cases, we define some keywords that basically stand in for particular common arguments
             // That way at least the common cases can be used by everyone (and it also compresses things).
@@ -368,6 +374,12 @@ namespace System.Diagnostics
         [Event(12, Keywords = Keywords.Events, ActivityOptions = EventActivityOptions.Recursive)]
         private void ActivityStop(string SourceName, string ActivityName, IEnumerable<KeyValuePair<string, string?>> Arguments) =>
             WriteEvent(12, SourceName, ActivityName, Arguments);
+
+        [Event(13, Keywords = Keywords.ActivityChange, Level = EventLevel.Verbose)]
+        public void ActivityChange(string? SpanId)
+        {
+            WriteEvent(13, SpanId);
+        }
 
         #region private
 
