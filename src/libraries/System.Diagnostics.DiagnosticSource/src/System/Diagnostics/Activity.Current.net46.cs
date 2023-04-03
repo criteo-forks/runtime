@@ -1,13 +1,14 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.Tracing;
 using System.Threading;
 
 namespace System.Diagnostics
 {
     public partial class Activity
     {
-        private static readonly AsyncLocal<Activity?> s_current = new AsyncLocal<Activity?>();
+        private static readonly AsyncLocal<Activity?> s_current = new AsyncLocal<Activity?>(OnActivityChange);
 
         /// <summary>
         /// Gets or sets the current operation (Activity) for the current thread.  This flows
@@ -28,6 +29,14 @@ namespace System.Diagnostics
         private static void SetCurrent(Activity? activity)
         {
             s_current.Value = activity;
+        }
+
+        private static void OnActivityChange(AsyncLocalValueChangedArgs<Activity?> args)
+        {
+            if (DiagnosticSourceEventSource.Logger.IsEnabled(EventLevel.Verbose, DiagnosticSourceEventSource.Keywords.ActivityChange))
+            {
+                DiagnosticSourceEventSource.Logger.ActivityChange(args.CurrentValue?._spanId);
+            }
         }
     }
 }
