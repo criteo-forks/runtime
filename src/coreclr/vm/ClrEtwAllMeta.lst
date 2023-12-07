@@ -190,6 +190,13 @@ nomac:Contention:::ContentionStop
 nostack:Contention:::ContentionStop_V1
 nomac:Contention:::ContentionStop_V1
 
+###################
+# WaitHandle events
+###################
+nomac:WaitHandle:::WaitHandleWaitStart
+nostack:WaitHandle:::WaitHandleWaitStop
+nomac:WaitHandle:::WaitHandleWaitStop
+
 ##################
 # StackWalk events
 ##################
