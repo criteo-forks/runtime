@@ -661,6 +661,22 @@ ULONG FireEtwGCFitBucketInfo(
     const GUID * RelatedActivityId = nullptr
 );
 
+BOOL EventEnabledWaitHandleWaitStart(void);
+ULONG FireEtwWaitHandleWaitStart(
+    const unsigned char  WaitSource,
+    const void*  AssociatedObjectID,
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId = nullptr,
+    const GUID * RelatedActivityId = nullptr
+);
+
+BOOL EventEnabledWaitHandleWaitStop(void);
+ULONG FireEtwWaitHandleWaitStop(
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId = nullptr,
+    const GUID * RelatedActivityId = nullptr
+);
+
 #ifdef FEATURE_ETW
 
 // ==================================================================
