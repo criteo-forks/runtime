@@ -596,4 +596,18 @@ ULONG EventPipeWriteEventGCFitBucketInfo(
     const GUID * ActivityId = nullptr,
     const GUID * RelatedActivityId = nullptr
 );
+BOOL EventPipeEventEnabledWaitHandleWaitStart(void);
+ULONG EventPipeWriteEventWaitHandleWaitStart(
+    const unsigned char  WaitSource,
+    const void*  AssociatedObjectID,
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId = nullptr,
+    const GUID * RelatedActivityId = nullptr
+);
+BOOL EventPipeEventEnabledWaitHandleWaitStop(void);
+ULONG EventPipeWriteEventWaitHandleWaitStop(
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId = nullptr,
+    const GUID * RelatedActivityId = nullptr
+);
 

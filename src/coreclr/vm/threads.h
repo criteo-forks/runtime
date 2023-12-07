@@ -2688,7 +2688,7 @@ public:
 private:
     void           DoAppropriateWaitWorkerAlertableHelper(WaitMode mode);
     DWORD          DoAppropriateWaitWorker(int countHandles, HANDLE *handles, BOOL waitAll,
-                                           DWORD millis, WaitMode mode);
+                                           DWORD millis, WaitMode mode, void *associatedObjectForMonitorWait);
     DWORD          DoAppropriateWaitWorker(AppropriateWaitFunc func, void *args,
                                            DWORD millis, WaitMode mode);
     DWORD          DoSignalAndWaitWorker(HANDLE* pHandles, DWORD millis,BOOL alertable);
@@ -4955,6 +4955,7 @@ inline void Thread::DecrementTraceCallCount()
 // state to be correct.  So we carry it around in case we need to restore it.
 struct PendingSync
 {
+    void*           m_Object;
     LONG            m_EnterCount;
     WaitEventLink  *m_WaitEventLink;
 #ifdef _DEBUG

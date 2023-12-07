@@ -726,6 +726,26 @@ ULONG FireEtwGCFitBucketInfo(
 )
 { return ERROR_SUCCESS; }
 
+BOOL EventEnabledWaitHandleWaitStart(void) { return 0; }
+
+ULONG FireEtwWaitHandleWaitStart(
+    const unsigned char  WaitSource,
+    const void*  AssociatedObjectID,
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId,
+    const GUID * RelatedActivityId
+)
+{ return ERROR_SUCCESS; }
+
+BOOL EventEnabledWaitHandleWaitStop(void) { return 0; }
+
+ULONG FireEtwWaitHandleWaitStop(
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId,
+    const GUID * RelatedActivityId
+)
+{ return ERROR_SUCCESS; }
+
 #ifdef FEATURE_ETW
 
 // ==================================================================
