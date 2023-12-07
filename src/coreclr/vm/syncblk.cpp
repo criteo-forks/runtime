@@ -2854,6 +2854,7 @@ BOOL SyncBlock::Wait(INT32 timeOut)
     PendingSync   syncState(walk);
 
     OBJECTREF     obj = m_Monitor.GetOwningObject();
+    syncState.m_Object = OBJECTREFToObject(obj);
 
     m_Monitor.IncrementTransientPrecious();
 
