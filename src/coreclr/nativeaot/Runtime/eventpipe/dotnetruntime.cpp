@@ -164,6 +164,8 @@ EventPipeEvent *EventPipeEventGenAwareBegin = nullptr;
 EventPipeEvent *EventPipeEventGenAwareEnd = nullptr;
 EventPipeEvent *EventPipeEventGCLOHCompact = nullptr;
 EventPipeEvent *EventPipeEventGCFitBucketInfo = nullptr;
+EventPipeEvent *EventPipeEventWaitHandleWaitStart = nullptr;
+EventPipeEvent *EventPipeEventWaitHandleWaitStop = nullptr;
 
 BOOL EventPipeEventEnabledDestroyGCHandle(void)
 {
@@ -2938,6 +2940,86 @@ ULONG EventPipeWriteEventGCFitBucketInfo(
     return ERROR_SUCCESS;
 }
 
+BOOL EventPipeEventEnabledWaitHandleWaitStart(void)
+{
+    return ep_event_is_enabled(EventPipeEventWaitHandleWaitStart);
+}
+
+ULONG EventPipeWriteEventWaitHandleWaitStart(
+    const unsigned char  WaitSource,
+    const void*  AssociatedObjectID,
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId,
+    const GUID * RelatedActivityId)
+{
+    if (!EventPipeEventEnabledWaitHandleWaitStart())
+        return ERROR_SUCCESS;
+
+    size_t size = 32;
+    uint8_t stackBuffer[32];
+    uint8_t *buffer = stackBuffer;
+    size_t offset = 0;
+    bool fixedBuffer = true;
+    bool success = true;
+
+    success &= WriteToBuffer(WaitSource, buffer, offset, size, fixedBuffer);
+    success &= WriteToBuffer((const BYTE *)AssociatedObjectID, buffer, offset, size, fixedBuffer);
+    success &= WriteToBuffer(ClrInstanceID, buffer, offset, size, fixedBuffer);
+
+    if (!success)
+    {
+        if (!fixedBuffer)
+            delete[] buffer;
+        return ERROR_WRITE_FAULT;
+    }
+
+    EventPipeAdapter::WriteEvent(EventPipeEventWaitHandleWaitStart, (BYTE *)buffer, (unsigned int)offset, ActivityId, RelatedActivityId);
+
+    if (!fixedBuffer)
+        delete[] buffer;
+
+
+    return ERROR_SUCCESS;
+}
+
+BOOL EventPipeEventEnabledWaitHandleWaitStop(void)
+{
+    return ep_event_is_enabled(EventPipeEventWaitHandleWaitStop);
+}
+
+ULONG EventPipeWriteEventWaitHandleWaitStop(
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId,
+    const GUID * RelatedActivityId)
+{
+    if (!EventPipeEventEnabledWaitHandleWaitStop())
+        return ERROR_SUCCESS;
+
+    size_t size = 32;
+    uint8_t stackBuffer[32];
+    uint8_t *buffer = stackBuffer;
+    size_t offset = 0;
+    bool fixedBuffer = true;
+    bool success = true;
+
+    success &= WriteToBuffer(ClrInstanceID, buffer, offset, size, fixedBuffer);
+
+    if (!success)
+    {
+        if (!fixedBuffer)
+            delete[] buffer;
+        return ERROR_WRITE_FAULT;
+    }
+
+    EventPipeAdapter::WriteEvent(EventPipeEventWaitHandleWaitStop, (BYTE *)buffer, (unsigned int)offset, ActivityId, RelatedActivityId);
+
+    if (!fixedBuffer)
+        delete[] buffer;
+
+
+    return ERROR_SUCCESS;
+}
+
 void InitProvidersAndEvents(void)
 {
     InitDotNETRuntime();
@@ -3009,6 +3091,8 @@ void InitDotNETRuntime(void)
     EventPipeEventGenAwareEnd = EventPipeAdapter::AddEvent(EventPipeProviderDotNETRuntime,207,1048576,0,EP_EVENT_LEVEL_INFORMATIONAL,true);
     EventPipeEventGCLOHCompact = EventPipeAdapter::AddEvent(EventPipeProviderDotNETRuntime,208,1,0,EP_EVENT_LEVEL_INFORMATIONAL,true);
     EventPipeEventGCFitBucketInfo = EventPipeAdapter::AddEvent(EventPipeProviderDotNETRuntime,209,1,0,EP_EVENT_LEVEL_VERBOSE,true);
+    EventPipeEventWaitHandleWaitStart = EventPipeAdapter::AddEvent(EventPipeProviderDotNETRuntime,301,4398046511104,0,EP_EVENT_LEVEL_VERBOSE,true);
+    EventPipeEventWaitHandleWaitStop = EventPipeAdapter::AddEvent(EventPipeProviderDotNETRuntime,302,4398046511104,0,EP_EVENT_LEVEL_VERBOSE,false);
 }
 
 bool DotNETRuntimeProvider_IsEnabled(unsigned char level, unsigned long long keyword)

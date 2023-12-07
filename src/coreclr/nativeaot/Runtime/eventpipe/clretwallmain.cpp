@@ -1068,6 +1068,32 @@ ULONG FireEtwGCFitBucketInfo(
     return status;
 }
 
+BOOL EventEnabledWaitHandleWaitStart(void) {return EventPipeEventEnabledWaitHandleWaitStart();}
+
+ULONG FireEtwWaitHandleWaitStart(
+    const unsigned char  WaitSource,
+    const void*  AssociatedObjectID,
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId,
+    const GUID * RelatedActivityId
+)
+{
+    ULONG status = EventPipeWriteEventWaitHandleWaitStart(WaitSource,AssociatedObjectID,ClrInstanceID,ActivityId,RelatedActivityId);
+    return status;
+}
+
+BOOL EventEnabledWaitHandleWaitStop(void) {return EventPipeEventEnabledWaitHandleWaitStop();}
+
+ULONG FireEtwWaitHandleWaitStop(
+    const unsigned short  ClrInstanceID,
+    const GUID * ActivityId,
+    const GUID * RelatedActivityId
+)
+{
+    ULONG status = EventPipeWriteEventWaitHandleWaitStop(ClrInstanceID,ActivityId,RelatedActivityId);
+    return status;
+}
+
 #ifdef FEATURE_ETW
 
 // ==================================================================

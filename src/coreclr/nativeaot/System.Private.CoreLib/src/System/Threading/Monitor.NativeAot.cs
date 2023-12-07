@@ -139,7 +139,7 @@ namespace System.Threading
 
             using (new DebugBlockingScope(obj, DebugBlockingItemType.MonitorEvent, millisecondsTimeout, out _))
             {
-                return condition.Wait(millisecondsTimeout);
+                return condition.Wait(millisecondsTimeout, obj);
             }
         }
 
