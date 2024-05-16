@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.Build.Traversal">
+  <PropertyGroup>
+    <NoWarn>NETSDK1212</NoWarn>
+  </PropertyGroup>
 
   <ItemGroup>
     <!-- Subsets are already imported by Directory.Build.props. -->
