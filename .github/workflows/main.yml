@@ -1,0 +1,22 @@
+name: Build and release runtime
+on: 
+  workflow_dispatch:
+    inputs:
+      tag: 
+        type: string
+        description: Tagged version to build
+  push:
+    tags:        
+      - '**'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet-buildtools/prereqs:centos-stream8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag }}
+      - name: build
+        run: build.sh
+  
