@@ -19,5 +19,5 @@ jobs:
         with:
           ref: ${{ github.ref }}
       - name: build
-        run: ./build.sh -c Release /p:VersionSuffix=criteo1 /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1
+        run: ./build.sh -c Release /p:VersionSuffix=criteo1 /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
   
