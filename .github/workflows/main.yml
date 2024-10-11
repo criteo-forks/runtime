@@ -1,5 +1,6 @@
 name: Build and release runtime
 on: 
+  pull_request:
   workflow_dispatch:
     inputs:
       tag: 
