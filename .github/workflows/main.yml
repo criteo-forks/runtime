@@ -19,5 +19,5 @@ jobs:
         with:
           ref: ${{ github.ref }}
       - name: build
-        run: build.sh
+        run: ./build.sh
   
