@@ -77,7 +77,7 @@ jobs:
           name: v${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}
           body: Release created from GitHub actions
           files: | 
-            dotnet-runtime-$${env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
+            dotnet-runtime-${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
             mscordaccore.dll
           draft: true
   
