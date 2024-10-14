@@ -28,7 +28,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-runtime
-          path: artifacts/packages/Release/Shipping/dotnet-runtime-$${env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
+          path: artifacts/packages/Release/Shipping/dotnet-runtime-${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
   build-windows:
     runs-on: windows-latest
     steps:
