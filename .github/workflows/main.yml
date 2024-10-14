@@ -22,9 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: refs/tags/v${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}
       - name: Build for Linux
-        run: ./build.sh -c Release /p:VersionSuffix=${{env.RUNTIME_PATCH}} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
+        run: ./build.sh clr -c Release /p:VersionSuffix=${{env.RUNTIME_PATCH}} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
       - uses: actions/upload-artifact@v4
         with:
           name: linux-runtime
@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: refs/tags/v${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}
       - name: Build CLR for Windows
         run: .\build.cmd clr -c Release /p:OfficialBuildId=20201010.1
       - uses: actions/upload-artifact@v4
