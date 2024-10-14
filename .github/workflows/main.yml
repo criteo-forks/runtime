@@ -11,7 +11,7 @@ on:
       - '**'
 env:
   RUNTIME_VERSION: 8.0.5
-  RUNTIME_PATCH: jpjp
+  RUNTIME_PATCH: jp
   
 jobs:
   
