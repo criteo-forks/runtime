@@ -27,6 +27,15 @@ jobs:
           path: .
       - name: list artiact content
         run: cat file.txt
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: Test JP
+          body: Release created from GitHub actions
+          files: file.txt
+          draft: true
+          
       
   
         
