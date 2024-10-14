@@ -1,0 +1,20 @@
+name: Download runtimes
+on: 
+  pull_request:
+
+env:
+  RUNTIME_VERSION: 8.0.5
+  RUNTIME_PATCH: jp
+  
+jobs:
+  
+  get-all:
+    runs-on: ubuntu-latest
+    steps:
+      - name : Download dotnet install scripts
+        run: wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+      - name: Install .Net
+        run: ./dotnet-install.sh --version ${{env.RUNTIME_VERSION}}
+      - name: list content
+        run: ls -l
+        
