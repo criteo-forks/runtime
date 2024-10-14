@@ -16,7 +16,8 @@ jobs:
       - name: Install .Net
         run: |
           chmod u+x ./dotnet-install.sh
-          ./dotnet-install.sh --version ${{env.RUNTIME_VERSION}} --runtime aspnetcore
+          mkdir -p dotnet-runtime
+          ./dotnet-install.sh --runtime aspnetcore --version ${{env.RUNTIME_VERSION}} --os linux --install-dir ./dotnet-runtime/
       - name: list content
-        run: ls -l
+        run: cd dotnet-runtime && ls -l
         
