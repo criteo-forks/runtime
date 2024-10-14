@@ -20,19 +20,22 @@ jobs:
     container:
       image: mcr.microsoft.com/dotnet-buildtools/prereqs:centos-stream8
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out runtime source code
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
       - name: Build for Linux
         run: ./build.sh -c Release /p:VersionSuffix=${{env.RUNTIME_PATCH}} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
-      - uses: actions/upload-artifact@v4
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
         with:
           name: linux-runtime
           path: artifacts/packages/Release/Shipping/dotnet-runtime-$${env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out runtime source code
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
       - name: Build CLR for Windows
