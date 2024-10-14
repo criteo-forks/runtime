@@ -7,17 +7,26 @@ env:
   RUNTIME_PATCH: jp
   
 jobs:
-  
-  get-all:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name : Download dotnet install scripts
-        run: wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
-      - name: Install .Net
-        run: |
-          chmod u+x ./dotnet-install.sh
-          mkdir -p dotnet-runtime
-          ./dotnet-install.sh --runtime aspnetcore --version ${{env.RUNTIME_VERSION}} --os linux --install-dir ./dotnet-runtime/
-      - name: list content
-        run: cd dotnet-runtime && ls -l
+    - name: create file
+      run: echo "Hello" > file.txt
+    - uses: actions/upload-artifact@v4
+      id: upload
+      with:
+        name: hello-world
+        path: file.txt
+  consume:
+    runs-on: ubuntu-latest
+    needs: publish
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hello-world
+          path: .
+      - name: list artiact content
+        run: cat file.txt
+      
+  
         
