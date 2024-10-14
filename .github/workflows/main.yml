@@ -20,24 +20,28 @@ jobs:
     container:
       image: mcr.microsoft.com/dotnet-buildtools/prereqs:centos-stream8
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out runtime source code
+        uses: actions/checkout@v4
         with:
           ref: refs/tags/v${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}
       - name: Build for Linux
-        run: ./build.sh clr -c Release /p:VersionSuffix=${{env.RUNTIME_PATCH}} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
-      - uses: actions/upload-artifact@v4
+        run: ./build.sh -c Release /p:VersionSuffix=${{env.RUNTIME_PATCH}} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
+      - name: Upload runtime arttifact
+        uses: actions/upload-artifact@v4
         with:
           name: linux-runtime
           path: artifacts/packages/Release/Shipping/dotnet-runtime-${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out runtime source code
+        uses: actions/checkout@v4
         with:
           ref: refs/tags/v${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}
       - name: Build CLR for Windows
         run: .\build.cmd clr -c Release /p:OfficialBuildId=20201010.1
-      - uses: actions/upload-artifact@v4
+      - name: Upload mscordaccore artifact
+        uses: actions/upload-artifact@v4
         with:
           name: mscordaccore.dll
           path: artifacts/bin/coreclr/Linux.x64.Release/x64/mscordaccore.dll
