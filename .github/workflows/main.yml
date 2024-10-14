@@ -10,14 +10,22 @@ on:
     tags:        
       - '**'
 jobs:
-  test:
+  init:
     runs-on: ubuntu-latest
+    steps:
+     - name: Set output variables
+       run: |
+         echo "runtime_version=8.0.5" >> $GITHUB_OUTPUT
+         echo "runtime_patch=jp" >> $GITHUB_OUTPUT
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: init
     container:
       image: mcr.microsoft.com/dotnet-buildtools/prereqs:centos-stream8
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-      - name: Current dir
-        run: pwd
+      - name: build
+        run: echo Outputs = ${{needs.init.outputs.runtime_version}} - ${{needs.init.outputs.runtime_patch}}
   
