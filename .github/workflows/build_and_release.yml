@@ -24,7 +24,7 @@ jobs:
           [ -n "${{github.event.inputs.tag}}" ] && TAG="refs/tags/${{github.event.inputs.tag}}"
           [ -z "$TAG"] && [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
 
-          echo TAG=refs/tags/${{github.event.inputs.tag}}
+          TAG=refs/tags/v8.0.5-testjp
           echo ref-to-checkout=${TAG} >> $GITHUB_OUTPUT
           
       - name: Check out runtime source code
