@@ -46,7 +46,7 @@ jobs:
       - name: Check out runtime source code
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/v${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}
+          ref: ${{github.rev}}
       - name: Build for Linux
         run: ./build.sh -c Release /p:VersionSuffix=${{env.RUNTIME_PATCH}} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
       - name : Download dotnet install scripts
