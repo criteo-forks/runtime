@@ -16,8 +16,14 @@ jobs:
       runtime-version: ${{ steps.set-env.outputs.runtime-version }}
       runtime-patch: ${{ steps.set-env.outputs.runtime-patch }}
     runs-on: ubuntu-latest
+    
+    VERSION=$(sed -n 's#.*<ProductVersion>\(.*\)</ProductVersion>#\1#p' < /c/dev/project.txt)
     steps:
-      - name: Extract runtime variables from workflow inputs
+      - name: Check out runtime source code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{github.rev}}          
+      - name: Extract runtime version (from code) and patch (from github ref)
         id: set-env
         run: |
           [ -n "${{github.event.inputs.tag}}" ] && TAG="/refs/tags/${{github.event.inputs.tag}}"
@@ -25,12 +31,13 @@ jobs:
           regex="refs\/.*\/v(.*)-(.*)"
           if [[ "$TAG" =~ $regex ]]
           then
-            RUNTIME_VERSION=${BASH_REMATCH[1]}
             RUNTIME_PATCH=${BASH_REMATCH[2]}
           else
-            RUNTIME_VERSION=dev
             RUNTIME_PATCH=dev
-          fi        
+          fi
+          
+          echo RUNTIME_VERSION=${RUNTIME_VERSION}
+          echo RUNTIME_PATCH=${RUNTIME_PATCH}
           
           echo runtime-version=${RUNTIME_VERSION} >> $GITHUB_OUTPUT
           echo runtime-patch=${RUNTIME_PATCH} >> $GITHUB_OUTPUT
