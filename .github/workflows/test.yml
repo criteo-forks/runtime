@@ -1,0 +1,29 @@
+name: Download runtimes
+on: 
+  pull_request:
+
+env:
+  RUNTIME_VERSION: 8.0.5
+  RUNTIME_PATCH: jp
+  
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download .Net runtime artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-runtime
+          path: .
+      - name: Download mscordaccore artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mscordaccore.dll
+          path: .
+      - name : Download dotnet install scripts
+        run: wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+      - name: Retrieve official ASP.Net Core runtime
+        run: |
+          chmod u+x ./dotnet-install.sh
+          mkdir -p dotnet-runtime
+          ./dotnet-install.sh --runtime aspnetcore --version ${{env.RUNTIME_VERSION}} --os linux --install-dir ./dotnet-runtime/
