@@ -16,8 +16,6 @@ jobs:
       runtime-version: ${{ steps.set-env.outputs.runtime-version }}
       runtime-patch: ${{ steps.set-env.outputs.runtime-patch }}
     runs-on: ubuntu-latest
-    
-    VERSION=$(sed -n 's#.*<ProductVersion>\(.*\)</ProductVersion>#\1#p' < /c/dev/project.txt)
     steps:
       - name: Check out runtime source code
         uses: actions/checkout@v4
