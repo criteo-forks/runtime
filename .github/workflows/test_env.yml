@@ -21,10 +21,10 @@ jobs:
       - name: Extract runtime variables from workflow inputs
         id: set-env
         run: |
-          [ -n "${{github.ref}}" ] && TAG = "${{github.ref}}"
-          [ -n "${{github.event.inputs.tag}}" ] && TAG = "${{github.event.inputs.tag}}"
+          [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
+          [ -n "${{github.event.inputs.tag}}" ] && TAG="${{github.event.inputs.tag}}"
 
-          echo TAG = $TAG
+          echo "TAG = $TAG"
           
           
           echo runtime-version=8.0.5 >> $GITHUB_OUTPUT
