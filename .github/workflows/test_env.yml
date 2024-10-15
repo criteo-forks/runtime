@@ -22,13 +22,19 @@ jobs:
         id: set-env
         run: |
           [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
-          [ -n "${{github.event.inputs.tag}}" ] && TAG="${{github.event.inputs.tag}}"
-
-          echo "TAG = $TAG"
+          [ -n "${{github.event.inputs.tag}}" ] && TAG="/refs/tags/${{github.event.inputs.tag}}"
+          regex="refs\/.*\/(.*)-(.*)"
+          if [[ "refs/tags/v0.8.5-criteo1" =~ $regex ]]
+          then
+            RUNTIME_VERSION=${BASH_REMATCH[1]}
+            RUNTIME_PATCH=${BASH_REMATCH[2]}
+          else
+            RUNTIME_VERSION=dev
+            RUNTIME_PATCH=dev
+          fi        
           
-          
-          echo runtime-version=8.0.5 >> $GITHUB_OUTPUT
-          echo runtime-patch=patch >> $GITHUB_OUTPUT
+          echo runtime-version=${RUNTIME_VERSION} >> $GITHUB_OUTPUT
+          echo runtime-patch=${RUNTIME_PATCH} >> $GITHUB_OUTPUT
   use-env-variables:
     runs-on: ubuntu-latest
     needs: env-variables
