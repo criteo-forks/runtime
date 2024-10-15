@@ -21,9 +21,10 @@ jobs:
       - name: Extract runtime variables from workflow inputs
         id: set-env
         run: |
-          [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
-          [ -n "${{github.event.inputs.tag}}" ] && TAG="/refs/tags/${{github.event.inputs.tag}}"
-          regex="refs\/.*\/(.*)-(.*)"
+          ([ -n "${{github.event.inputs.tag}}" ] && TAG="/refs/tags/${{github.event.inputs.tag}}")
+          || ([ -n "${{github.ref}}" ] && TAG="${{github.ref}}")
+          echo TAG=$TAG
+          regex="refs\/.*\/v(.*)-(.*)"
           if [[ "refs/tags/v0.8.5-criteo1" =~ $regex ]]
           then
             RUNTIME_VERSION=${BASH_REMATCH[1]}
