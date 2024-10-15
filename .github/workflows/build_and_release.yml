@@ -21,9 +21,10 @@ jobs:
       - name: Find version to checkout
         id: find-ref
         run: |
-          [ -n "${{github.event.inputs.tag}}" ] && TAG="/refs/tags/${{github.event.inputs.tag}}"
+          [ -n "${{github.event.inputs.tag}}" ] && TAG="refs/tags/${{github.event.inputs.tag}}"
           [ -z "$TAG"] && [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
 
+          TAG=refs/tags/v8.0.5-testjp
           echo ref-to-checkout=${TAG} >> $GITHUB_OUTPUT
           
       - name: Check out runtime source code
@@ -93,6 +94,7 @@ jobs:
           path: artifacts/packages/Release/Shipping/aspnetcore-runtime-${{env.RUNTIME_VERSION}}-${{env.RUNTIME_PATCH}}-linux-x64.tar.gz
   build-windows:
     runs-on: windows-latest
+    needs: env-variables
     steps:
       - name: Check out runtime source code
         uses: actions/checkout@v4
