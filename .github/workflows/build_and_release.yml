@@ -24,6 +24,7 @@ jobs:
       - name: Extract runtime version (from code) and patch (from github ref)
         id: set-env
         run: |
+          RUNTIME_VERSION=$(sed -n 's#.*<ProductVersion>\(.*\)</ProductVersion>#\1#p' < eng/Versions.props)
           [ -n "${{github.event.inputs.tag}}" ] && TAG="/refs/tags/${{github.event.inputs.tag}}"
           [ -z "$TAG"] && [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
           regex="refs\/.*\/v(.*)-(.*)"
