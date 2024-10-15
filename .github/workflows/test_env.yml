@@ -1,4 +1,5 @@
 name: Test passing variables between jobs
+on:
   pull_request:
   workflow_dispatch:
     inputs:
