@@ -21,12 +21,9 @@ jobs:
       - name: Extract runtime variables from workflow inputs
         id: set-env
         run: |
-          if [[ "${{github.ref}}" != "" ]];then
-            TAG = "${{github.ref}}"
-          endif
-          if [[ "${{github.event.inputs.tag}}" != "" ]];then
-            TAG = "${{github.event.inputs.tag}}"
-          endif
+          [ -n "${{github.ref}}" ] && TAG = "${{github.ref}}"
+          [ -n "${{github.event.inputs.tag}}" ] && TAG = "${{github.event.inputs.tag}}"
+
           echo TAG = $TAG
           
           
