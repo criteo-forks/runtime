@@ -1,0 +1,34 @@
+name: 'build-windows-runtime'
+description: 'Build Windos runtime'
+inputs:
+  version-runtime:
+    description: 'Base version of the runtime (e.g. 8.0.10)'
+    required: true
+  version-patch:
+    description: 'Patch version (like criteo1)'
+    required: true
+  build-configuration:
+    description: 'Configuration to build (Debug, Release) Note the capital letter'
+    required: true
+  output-artifact-name:
+    description: 'Name of the artifact that will be uploaded (to be retrieved later in the workflow)'
+    required: true
+  mscordaccore-artifact-name:
+    description: 'Name of the artifact containing mscordaccore.dll file'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Build for Windows (${{ inputs.build-configuration }})
+      shell: powershell
+      run: .\build.cmd -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
+    - name: Upload runtime artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.output-artifact-name }}
+        path: artifacts/packages/${{ inputs.build-configuration }}/Shipping/dotnet-runtime-${{ inputs.version-runtime }}-${{ inputs.version-patch }}-win-x64.zip
+    - name: Upload mscordaccore artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.mscordaccore-artifact-name }}
+        path: artifacts/bin/coreclr/Linux.x64.${{ inputs.build-configuration }}/x64/mscordaccore.dll
