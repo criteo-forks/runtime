@@ -70,41 +70,8 @@ jobs:
           version-runtime: ${{needs.env-variables.outputs.runtime-version}}
           version-patch: ${{needs.env-variables.outputs.runtime-patch}}
           build-configuration: Release
-          output-artifact-name: 'linux-runtime-release'
-  build-linux-debug:
-    runs-on: ubuntu-latest
-    needs: env-variables
-    container:
-      image: mcr.microsoft.com/dotnet-buildtools/prereqs:centos-stream8
-    steps:
-      - name: Check out runtime source code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{env.CODE_VERSION}}
-      - name: Build
-        uses: ./.github/actions/build-linux
-        with:
-          version-runtime: ${{needs.env-variables.outputs.runtime-version}}
-          version-patch: ${{needs.env-variables.outputs.runtime-patch}}
-          build-configuration: Debug
-          output-artifact-name: 'linux-runtime-debug'
-          
+          output-artifact-name: 'linux-runtime-release'          
 
-  build-windows-debug:
-    runs-on: windows-latest
-    needs: env-variables
-    steps:
-      - name: Check out runtime source code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{env.CODE_VERSION}}
-      - name: Build
-        uses: ./.github/actions/build-windows
-        with:
-          version-runtime: ${{needs.env-variables.outputs.runtime-version}}
-          version-patch: ${{needs.env-variables.outputs.runtime-patch}}
-          build-configuration: Debug
-          output-artifact-name: 'windows-runtime-debug'
   build-windows-release:
     runs-on: windows-latest
     needs: env-variables
@@ -120,6 +87,7 @@ jobs:
           version-patch: ${{needs.env-variables.outputs.runtime-patch}}
           build-configuration: Release
           output-artifact-name: 'windows-runtime-release'
+          mscordaccore-artifact-name: 'mscordaccore-release'
   package-and-release:
     runs-on: ubuntu-latest
     if: needs.env-variables.outputs.runtime-patch != 'dev'
@@ -128,9 +96,7 @@ jobs:
       RUNTIME_PATCH: ${{needs.env-variables.outputs.runtime-patch}}
     needs:
       - env-variables
-      #- build-linux-debug
       - build-linux-release
-      #- build-windows-debug
       - build-windows-release
     steps:
       - name: Download .Net runtime artifact
@@ -141,7 +107,7 @@ jobs:
       - name: Download mscordaccore artifact
         uses: actions/download-artifact@v4
         with:
-          name: mscordaccore.dll
+          name: mscordaccore-release
           path: .
       - name: Create release
         uses: softprops/action-gh-release@v2
