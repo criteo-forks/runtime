@@ -1,0 +1,60 @@
+name: 'build-linux-runtime'
+description: 'Build Linux runtime'
+inputs:
+  version-runtime:
+    description: 'Base version of the runtime (e.g. 8.0.10)'
+    required: true
+  version-patch:
+    description: 'Patch version (like criteo1)'
+    required: true
+  build-configuration:
+    description: 'Configuration to build (Debug, Release) Note the capital letter'
+    required: true
+  output-artifact-name:
+    description: 'Name of the artifact that will be uploaded (to be retrieved later in the workflow)'
+    required: true
+#outputs:
+#  random-number:
+#    description: "Random number"
+#    value: ${{ steps.random-number-generator.outputs.random-number }}
+runs:
+  using: "composite"
+  steps:
+    - name: Build for Linux (${{ inputs.build-configuration }})
+      shell: bash
+      run: ./build.sh -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false /p:SkipArchivesBuild=false
+    - name : Download dotnet install scripts
+      shell: bash
+      run: wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+    - name: Retrieve official ASP.Net Core runtime
+      shell: bash
+      run: |
+        chmod u+x ./dotnet-install.sh
+        mkdir -p artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
+        ./dotnet-install.sh --runtime aspnetcore --version ${{ inputs.version-runtime }} --os linux --install-dir artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
+    - name: Extract generated runtime artifact, add crossgen, symbols, and AspNetCore runtime
+      shell: bash
+      run: |
+        FULL_VERSION=${{ inputs.version-runtime }}-${{ inputs.version-patch }}
+        cd artifacts/packages/${{ inputs.build-configuration }}/Shipping
+        mkdir -p dotnet-runtime
+        cd dotnet-runtime
+        tar -xzvf ../dotnet-runtime-${FULL_VERSION}-linux-x64.tar.gz
+        cd shared/Microsoft.NETCore.App/${FULL_VERSION}
+        tar -xzvf ../../../../dotnet-crossgen2-${FULL_VERSION}-linux-x64.tar.gz
+        tar -xzvf ../../../../dotnet-runtime-symbols-linux-x64-${FULL_VERSION}.tar.gz
+        cd ../../../..
+        cp -R aspnetcore-runtime/shared/Microsoft.AspNetCore.App dotnet-runtime/shared/Microsoft.AspNetCore.App
+        mv dotnet-runtime/shared/Microsoft.AspNetCore.App/${{env.RUNTIME_VERSION}} dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
+        dotnet tool install dotnet-symbol -g
+        cd dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
+        dotnet-symbol --symbols *
+        cd ../../../..
+        sed -i "s/${{env.RUNTIME_VERSION}}/${FULL_VERSION}/g" dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}/Microsoft.AspNetCore.App.runtimeconfig.json
+        cd dotnet-runtime
+        tar -zcvf ../aspnetcore-runtime-${FULL_VERSION}-linux-x64.tar.gz .
+    - name: Upload runtime artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.output-artifact-name }}
+        path: artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime-${{ inputs.version-runtime }}-${{ inputs.version-patch }}-linux-x64.tar.gz
