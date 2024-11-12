@@ -30,7 +30,7 @@ jobs:
           [ -n "${{github.event.inputs.tag}}" ] && TAG="refs/tags/${{github.event.inputs.tag}}"
           [ -n "${{github.event.inputs.commit}}" ] && TAG="${{github.event.inputs.commit}}"
           [ -z "$TAG" ] && [ -n "${{github.ref}}" ] && TAG="${{github.ref}}"
-          echo ref-to-checkout=${TAG} >> $GITHUB_OUTPUT
+          echo ref-to-checkout=refs/tsgs/v8.0.5-testjp >> $GITHUB_OUTPUT
 
       - name: Check out runtime source code
         uses: actions/checkout@v4
