@@ -46,9 +46,9 @@ runs:
         cd ../../../..
         cp -R aspnetcore-runtime/shared/Microsoft.AspNetCore.App dotnet-runtime/shared/Microsoft.AspNetCore.App
         mv dotnet-runtime/shared/Microsoft.AspNetCore.App/${{inputs.version-runtime}} dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
-        dotnet tool install dotnet-symbol -g
+        artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet tool install dotnet-symbol -g
         cd dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
-        dotnet-symbol --symbols *
+        artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet tool run symbol --symbols *
         cd ../../../..
         sed -i "s/${{inputs.version-runtime}}/${FULL_VERSION}/g" dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}/Microsoft.AspNetCore.App.runtimeconfig.json
         cd dotnet-runtime
