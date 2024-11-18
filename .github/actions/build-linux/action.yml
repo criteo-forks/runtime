@@ -36,6 +36,7 @@ runs:
     - name: Extract generated runtime artifact, add crossgen, symbols, and AspNetCore runtime
       shell: bash
       run: |
+        DOTNET_DIR=$(pwd artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime)
         FULL_VERSION=${{ inputs.version-runtime }}-${{ inputs.version-patch }}
         cd artifacts/packages/${{ inputs.build-configuration }}/Shipping
         mkdir -p dotnet-runtime
@@ -47,9 +48,9 @@ runs:
         cd ../../../..
         cp -R aspnetcore-runtime/shared/Microsoft.AspNetCore.App dotnet-runtime/shared/Microsoft.AspNetCore.App
         mv dotnet-runtime/shared/Microsoft.AspNetCore.App/${{inputs.version-runtime}} dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
-        artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet tool install dotnet-symbol -g
+        $DOTNET_DIR/dotnet tool install dotnet-symbol -g
         cd dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
-        artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet tool run symbol --symbols *
+        $DOTNET_DIR//dotnet tool run symbol --symbols *
         cd ../../../..
         sed -i "s/${{inputs.version-runtime}}/${FULL_VERSION}/g" dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}/Microsoft.AspNetCore.App.runtimeconfig.json
         cd dotnet-runtime
