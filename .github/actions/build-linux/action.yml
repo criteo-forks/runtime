@@ -32,6 +32,7 @@ runs:
         chmod u+x ./dotnet-install.sh
         mkdir -p artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         ./dotnet-install.sh --runtime aspnetcore --version ${{ inputs.version-runtime }} --os linux --install-dir artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
+        chmod u+x artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet
     - name: Extract generated runtime artifact, add crossgen, symbols, and AspNetCore runtime
       shell: bash
       run: |
