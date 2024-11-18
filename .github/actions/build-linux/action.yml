@@ -45,12 +45,12 @@ runs:
         tar -xzvf ../../../../dotnet-runtime-symbols-linux-x64-${FULL_VERSION}.tar.gz
         cd ../../../..
         cp -R aspnetcore-runtime/shared/Microsoft.AspNetCore.App dotnet-runtime/shared/Microsoft.AspNetCore.App
-        mv dotnet-runtime/shared/Microsoft.AspNetCore.App/${{env.RUNTIME_VERSION}} dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
+        mv dotnet-runtime/shared/Microsoft.AspNetCore.App/${{inputs.version-runtime}} dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
         dotnet tool install dotnet-symbol -g
         cd dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
         dotnet-symbol --symbols *
         cd ../../../..
-        sed -i "s/${{env.RUNTIME_VERSION}}/${FULL_VERSION}/g" dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}/Microsoft.AspNetCore.App.runtimeconfig.json
+        sed -i "s/${{inputs.version-runtime}}/${FULL_VERSION}/g" dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}/Microsoft.AspNetCore.App.runtimeconfig.json
         cd dotnet-runtime
         tar -zcvf ../aspnetcore-runtime-${FULL_VERSION}-linux-x64.tar.gz .
     - name: Upload runtime artifact
