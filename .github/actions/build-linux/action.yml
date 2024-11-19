@@ -25,18 +25,26 @@ runs:
       run: ./build.sh -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false /p:SkipArchivesBuild=false
     - name : Download dotnet install scripts
       shell: bash
-      run: wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+      run: |
+        wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+        chmod u+x ./dotnet-install.sh
     - name: Retrieve official ASP.Net Core runtime
       shell: bash
       run: |
-        chmod u+x ./dotnet-install.sh
         mkdir -p artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         ./dotnet-install.sh --runtime aspnetcore --version ${{ inputs.version-runtime }} --os linux --install-dir artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         chmod u+x artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet
+    - name: Install .NET SDK and dotnet-symbol
+      shell: bash
+      run: |
+        mkdir -p dotnet-sdk
+        ./dotnet-install.sh --os linux --install-dir dotnet-sdk
+        chmod u+x dotnet-sdk/dotnet
+        dotnet-sdk/dotnet tool install dotnet-symbol -g
     - name: Extract generated runtime artifact, add crossgen, symbols, and AspNetCore runtime
       shell: bash
       run: |
-        DOTNET_DIR=$(cd artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime ; pwd)
+        DOTNET_SDK_DIR=$(cd dotnet-sdk ; pwd)
         FULL_VERSION=${{ inputs.version-runtime }}-${{ inputs.version-patch }}
         cd artifacts/packages/${{ inputs.build-configuration }}/Shipping
         mkdir -p dotnet-runtime
@@ -48,9 +56,8 @@ runs:
         cd ../../../..
         cp -R aspnetcore-runtime/shared/Microsoft.AspNetCore.App dotnet-runtime/shared/Microsoft.AspNetCore.App
         mv dotnet-runtime/shared/Microsoft.AspNetCore.App/${{inputs.version-runtime}} dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
-        $DOTNET_DIR/dotnet tool install dotnet-symbol -g
         cd dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}
-        $DOTNET_DIR//dotnet tool run symbol --symbols *
+        $DOTNET_SDK_DIR//dotnet tool run symbol --symbols *
         cd ../../../..
         sed -i "s/${{inputs.version-runtime}}/${FULL_VERSION}/g" dotnet-runtime/shared/Microsoft.AspNetCore.App/${FULL_VERSION}/Microsoft.AspNetCore.App.runtimeconfig.json
         cd dotnet-runtime
