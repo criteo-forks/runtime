@@ -31,6 +31,9 @@ runs:
         ./dotnet-install.sh --runtime aspnetcore --version ${{ inputs.version-runtime }} --os linux --install-dir artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         chmod u+x artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet
         ls -l -R artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
+        DOTNET_DIR=$(pwd artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime)
+        echo $DOTNET_DIR
+        $DOTNET_DIR/dotnet
         exit 1
     - name: Build for Linux (${{ inputs.build-configuration }})
       shell: bash
