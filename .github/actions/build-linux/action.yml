@@ -13,10 +13,6 @@ inputs:
   output-artifact-name:
     description: 'Name of the artifact that will be uploaded (to be retrieved later in the workflow)'
     required: true
-#outputs:
-#  random-number:
-#    description: "Random number"
-#    value: ${{ steps.random-number-generator.outputs.random-number }}
 runs:
   using: "composite"
   steps:
@@ -33,19 +29,22 @@ runs:
         export PATH=$PATH:$(cd dotnet-sdk ; pwd)
         dotnet tool install dotnet-symbol --global
         export PATH=$PATH:~/.dotnet/tools
+        echo "DOTNET_ROOT=$DOTNET_ROOT" >> $GITHUB_ENV
     - name: Build for Linux (${{ inputs.build-configuration }})
       shell: bash
       run: ./build.sh -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false /p:SkipArchivesBuild=false
     - name: Retrieve official ASP.Net Core runtime
       shell: bash
       run: |
+        export DOTNET_ROOT=${{ env.DOTNET_ROOT }}
+        ~/.dotnet/tools/dotnet-symbol --symbols *
+        exit 1
         mkdir -p artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         ./dotnet-install.sh --runtime aspnetcore --version ${{ inputs.version-runtime }} --os linux --install-dir artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         chmod u+x artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet
     - name: Extract generated runtime artifact, add crossgen, symbols, and AspNetCore runtime
       shell: bash
       run: |
-        DOTNET_SDK_DIR=$(cd dotnet-sdk ; pwd)
         FULL_VERSION=${{ inputs.version-runtime }}-${{ inputs.version-patch }}
         cd artifacts/packages/${{ inputs.build-configuration }}/Shipping
         mkdir -p dotnet-runtime
