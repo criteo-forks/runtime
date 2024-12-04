@@ -29,8 +29,8 @@ runs:
       shell: bash
       run: |
         ./dotnet-install.sh --os linux --install-dir dotnet-sdk
-        export DOTNET_ROOT=$(cd dotnet-sdk ;; pwd)
-        export PATH=$PATH:$(cd dotnet-sdk ;; pwd)
+        export DOTNET_ROOT=$(cd dotnet-sdk ; pwd)
+        export PATH=$PATH:$(cd dotnet-sdk ; pwd)
         dotnet tool install dotnet-symbol --global
         export PATH=$PATH:~/.dotnet/tools
     - name: Build for Linux (${{ inputs.build-configuration }})
