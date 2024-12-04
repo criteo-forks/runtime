@@ -21,7 +21,7 @@ runs:
   steps:
     - name: Build for Windows (${{ inputs.build-configuration }})
       shell: powershell
-      run: .\build.cmd -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
+      run: .\build.cmd clr+libs -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false
     - name: Upload runtime artifact
       uses: actions/upload-artifact@v4
       with:
