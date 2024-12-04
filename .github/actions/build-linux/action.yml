@@ -20,27 +20,28 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Build for Linux (${{ inputs.build-configuration }})
-      shell: bash
-      run: ./build.sh -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false /p:SkipArchivesBuild=false
     - name : Download dotnet install scripts
       shell: bash
       run: |
         wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
         chmod u+x ./dotnet-install.sh
+    - name: Install dotnet symbol tool
+      shell: bash
+      run: |
+        ./dotnet-install.sh --os linux --install-dir dotnet-sdk
+        export DOTNET_ROOT=$(cd dotnet-sdk ;; pwd)
+        export PATH=$PATH:$(cd dotnet-sdk ;; pwd)
+        dotnet tool install dotnet-symbol --global
+        export PATH=$PATH:~/.dotnet/tools
+    - name: Build for Linux (${{ inputs.build-configuration }})
+      shell: bash
+      run: ./build.sh -c ${{ inputs.build-configuration }} /p:VersionSuffix=${{ inputs.version-patch }} /p:StabilizePackageVersion=false /p:OfficialBuildId=20201010.1 /p:NativeOptimizationDataSupported=false /p:SkipArchivesBuild=false
     - name: Retrieve official ASP.Net Core runtime
       shell: bash
       run: |
         mkdir -p artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         ./dotnet-install.sh --runtime aspnetcore --version ${{ inputs.version-runtime }} --os linux --install-dir artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime
         chmod u+x artifacts/packages/${{ inputs.build-configuration }}/Shipping/aspnetcore-runtime/dotnet
-    - name: Install .NET SDK and dotnet-symbol
-      shell: bash
-      run: |
-        mkdir -p dotnet-sdk
-        ./dotnet-install.sh --os linux --install-dir dotnet-sdk
-        chmod u+x dotnet-sdk/dotnet
-        dotnet-sdk/dotnet tool install dotnet-symbol -g
     - name: Extract generated runtime artifact, add crossgen, symbols, and AspNetCore runtime
       shell: bash
       run: |
