@@ -103,7 +103,7 @@ jobs:
       - name: Download .Net runtime artifact
         uses: actions/download-artifact@v4
         with:
-          name: linux-runtime
+          name: linux-runtime-release
           path: .
       - name: Download mscordaccore artifact
         uses: actions/download-artifact@v4
