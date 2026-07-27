@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Data;
 using System.Runtime.Serialization.Schema;
 using System.Xml;
+using System.Xml.Schema;
+using System.Xml.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -20,8 +22,8 @@ namespace System.Runtime.Serialization.Schema.Tests
         }
 
         [Fact]
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/73961", typeof(PlatformDetection), nameof(PlatformDetection.IsBuiltWithAggressiveTrimming), nameof(PlatformDetection.IsBrowser))]
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/73961", typeof(PlatformDetection), nameof(PlatformDetection.IsMonoRuntime), nameof(PlatformDetection.IsBuiltWithAggressiveTrimming), nameof(PlatformDetection.IsAppleMobile))]
+        // Passes on some wasm, but not all? Seems to have both passed and failed on the same browser/wasm/OS/Mono-CoreCLR combo in the same pipeline? How does that happen? Is this trimming related?
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/73961", typeof(PlatformDetection), nameof(PlatformDetection.IsBuiltWithAggressiveTrimming))]
         public void RountTripTest()
         {
             // AppContext SetSwitch seems to be unreliable in the unit test case. So let's not rely on it
@@ -54,15 +56,22 @@ namespace System.Runtime.Serialization.Schema.Tests
             Assert.Contains(@"public System.Nullable<System.Runtime.Serialization.Schema.Tests.RoundTripTestDataContractStruct> NullableDataContractStruct2", code);
             Assert.Contains(@"[System.Runtime.Serialization.DataContractAttribute(Name=""RoundTripTest.EncodingMismatchClass"", Namespace=""http://schemas.datacontract.org/2004/07/System.Runtime.Serialization.Schema.Tests""", code);
             Assert.Contains(@"public partial class RoundTripTestEncodingMismatchClass : object, System.Runtime.Serialization.IExtensibleDataObject", code);
+            Assert.Contains(@"public int[][] intLists", code);
+            Assert.Contains(@"public System.Nullable<int>[] listOfNullableInt", code);
             Assert.Contains(@"public enum RoundTripTestMyEnum : int", code);
             Assert.Contains(@"TwoHundred = 200", code);
             Assert.Contains(@"public enum RoundTripTestMyFlagsEnum : int", code);
             Assert.Contains(@"Four = 4,", code);
-            Assert.Contains(@"public class ArrayOfNullableOfRoundTripTestMyEnumho3BZmza : System.Collections.Generic.List<System.Runtime.Serialization.Schema.Tests.RoundTripTestMyEnum>", code);
-            Assert.Contains(@"namespace schemas.microsoft.com._2003._10.Serialization.Arrays", code);
-            Assert.Contains(@"public partial class ArrayOfKeyValueOfintArrayOfstringty7Ep6D1 : object, System.Xml.Serialization.IXmlSerializable", code);
-            Assert.Contains(@"private static System.Xml.XmlQualifiedName typeName = new System.Xml.XmlQualifiedName(""ArrayOfKeyValueOfintArrayOfstringty7Ep6D1"", ""http://schemas.microsoft.com/2003/10/Serialization/Arrays"");", code);
-            Assert.Contains(@"public partial class ArrayOfKeyValueOfNullableOfunsignedByteNullableOfunsignedByte_ShTDFhl_P : object, System.Xml.Serialization.IXmlSerializable", code);
+            Assert.Contains(@"public System.Runtime.Serialization.Schema.Tests.RoundTripTestDataContractStruct[] arrayOfDataContractStruct", code);
+            Assert.Contains(@"public System.Nullable<System.Runtime.Serialization.Schema.Tests.RoundTripTestMyEnum>[] arrayOfNullableOfMyEnum", code);
+            Assert.Contains(@"public System.Collections.Generic.Dictionary<int, string[]>[] dictionaries", code);
+            Assert.Contains(@"public System.Collections.Generic.Dictionary<System.Nullable<byte>, System.Nullable<byte>> nullableKeyAndValues", code);
+            Assert.Contains(@"public System.Collections.Generic.Dictionary<string, System.Nullable<int>> nullableValues", code);
+            // Schema import when re-introduced in net7.0 did not correctly handle some collections, and we were generating a different code shape than NetFx. These redirection types shouldn't get created.
+            Assert.DoesNotContain(@"namespace schemas.microsoft.com._2003._10.Serialization.Arrays", code);
+            Assert.DoesNotContain(@"class ArrayOfNullableOfRoundTripTestMyEnum", code);
+            Assert.DoesNotContain(@"class ArrayOfKeyValueOfintArrayOfstringty", code);
+            Assert.DoesNotContain(@"class ArrayOfKeyValueOfNullableOfunsignedByteNullableOfunsignedByte", code);
 
             if (autoImportKVP)
             {
@@ -79,6 +88,24 @@ namespace System.Runtime.Serialization.Schema.Tests
         }
 
         [Fact]
+        public void RoundTripXmlSerializableWithSpecialAttributesTest()
+        {
+            XsdDataContractExporter exporter = new XsdDataContractExporter();
+            exporter.Export(typeof(SerializableWithSpecialAttributes));
+            string schemas = SchemaUtils.DumpSchema(exporter.Schemas);
+
+            XsdDataContractImporter importer = new XsdDataContractImporter();
+            importer.Options = new ImportOptions();
+            importer.Options.ImportXmlType = true;
+            importer.Options.ReferencedTypes.Add(typeof(DBNull));
+            importer.Options.ReferencedTypes.Add(typeof(DateTimeOffset));
+            importer.Import(exporter.Schemas);
+
+            string code = SchemaUtils.DumpCode(importer.CodeCompileUnit);
+            _output.WriteLine(code);
+        }
+
+        [Fact]
         public void IsReferenceType()
         {
             XsdDataContractExporter exporter = new XsdDataContractExporter();
@@ -92,7 +119,6 @@ namespace System.Runtime.Serialization.Schema.Tests
 
             Assert.True(code.Length > 616);
         }
-
 
 #pragma warning disable CS0169, CS0414, IDE0051, IDE1006
         #region RoundTripTest DataContracts
@@ -114,6 +140,7 @@ namespace System.Runtime.Serialization.Schema.Tests
             [DataMember] DataContractStruct?[] arrayOfNullableOfDataContractStruct;
             [DataMember] DataSet dataSet;
             [DataMember] IList<IList<int>> intLists;
+            [DataMember] IList<int?> listOfNullableInt;
             [DataMember] IList<IDictionary<int, IEnumerable<string>>> dictionaries;
             [DataMember] IDictionary<string, int?> nullableValues;
             [DataMember] IDictionary<byte?, byte?> nullableKeyAndValues;
@@ -343,6 +370,69 @@ namespace System.Runtime.Serialization.Schema.Tests
             public RefCircularNodeB_ContainsRefWithBackpointer(RefCircularNodeA_ContainsRefWithBackpointer nodeA)
             {
                 linkToA = nodeA;
+            }
+        }
+        #endregion
+
+        #region RoundTripXmlSerializableWithSpecialAttributesTest Classes
+        public class SerializableWithSpecialAttributes : IXmlSerializable
+        {
+            const string nestedAttributeName = "nestedAsAttributeString";
+
+            // Special nested class definition
+            [Serializable]
+            public class NestedClass
+            {
+                [XmlAttribute(AttributeName = nestedAttributeName)]
+                public string AttributeString { get; set; }
+            }
+
+            // Property of type NestedClass
+            public NestedClass MySpecialProperty { get; set; }
+
+            // IXmlSerializable methods
+            public XmlSchema GetSchema()
+            {
+                // Create an XmlSchema instance
+                var schema = new XmlSchema() { Id = "SerializableWithSpecialAttributesTest" };
+
+                // Define the target namespace (if needed)
+                schema.TargetNamespace = "http://example.com/my-test-namespace";
+
+                // Define complex type for OuterClass
+                var outerClassType = new XmlSchemaComplexType() { Name = "SerializableWithSpecialAttributes" };
+                schema.Items.Add(outerClassType);
+
+                // Define attribute for MySpecialProperty
+                var attribute = new XmlSchemaAttribute
+                {
+                    Name = nestedAttributeName,
+                    SchemaTypeName = new XmlQualifiedName("string", XmlSchema.Namespace)
+                };
+                outerClassType.Attributes.Add(attribute);
+
+                return schema;
+            }
+
+            public void WriteXml(XmlWriter writer)
+            {
+                // Serialize MyNestedProperty as an attribute
+                if (MySpecialProperty != null)
+                {
+                    writer.WriteAttributeString(nestedAttributeName, MySpecialProperty.AttributeString);
+                }
+            }
+
+            public void ReadXml(XmlReader reader)
+            {
+                // Deserialize MyNestedProperty from an attribute
+                if (reader.MoveToAttribute(nestedAttributeName))
+                {
+                    MySpecialProperty = new NestedClass
+                    {
+                        AttributeString = reader.Value
+                    };
+                }
             }
         }
         #endregion

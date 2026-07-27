@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Versioning;
 using ComTypes = System.Runtime.InteropServices.ComTypes;
 
@@ -45,6 +46,19 @@ namespace System.Runtime.InteropServices.CustomMarshalers
             EnumVariantViewOfEnumerator nativeView = new EnumVariantViewOfEnumerator((IEnumerator)ManagedObj);
 
             return Marshal.GetComInterfaceForObject<EnumVariantViewOfEnumerator, ComTypes.IEnumVARIANT>(nativeView);
+        }
+
+        [System.Runtime.InteropServices.UnmanagedCallersOnly]
+        private static unsafe void InternalMarshalNativeToManaged(IntPtr pNativeData, object* pResult, Exception* pException)
+        {
+            try
+            {
+                *pResult = GetInstance(null).MarshalNativeToManaged(pNativeData);
+            }
+            catch (Exception ex)
+            {
+                *pException = ex;
+            }
         }
 
         public object MarshalNativeToManaged(IntPtr pNativeData)

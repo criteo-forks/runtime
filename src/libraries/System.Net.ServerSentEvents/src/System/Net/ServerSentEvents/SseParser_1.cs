@@ -9,6 +9,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,6 +28,9 @@ namespace System.Net.ServerSentEvents
         private const byte LF = (byte)'\n';
         /// <summary>Carriage Return Line Feed.</summary>
         private static ReadOnlySpan<byte> CRLF => "\r\n"u8;
+
+        /// <summary>The maximum number of milliseconds representible by <see cref="System.TimeSpan"/>.</summary>
+        private readonly long TimeSpan_MaxValueMilliseconds = (long)TimeSpan.MaxValue.TotalMilliseconds;
 
         /// <summary>The default size of an ArrayPool buffer to rent.</summary>
         /// <remarks>Larger size used by default to minimize number of reads. Smaller size used in debug to stress growth/shifting logic.</remarks>
@@ -70,8 +74,16 @@ namespace System.Net.ServerSentEvents
         /// <remarks>This can be different than <see cref="_dataLength"/> != 0 if empty data was appended.</remarks>
         private bool _dataAppended;
 
+        private int _maxBufferSize = 1024 * 1024 * 1024;
+
         /// <summary>The event type for the next event.</summary>
-        private string _eventType = SseParser.EventTypeDefault;
+        private string? _eventType;
+
+        /// <summary>The event id for the next event.</summary>
+        private string? _eventId;
+
+        /// <summary>The reconnection interval for the next event.</summary>
+        private TimeSpan? _nextReconnectionInterval;
 
         /// <summary>Initialize the enumerable.</summary>
         /// <param name="stream">The stream to parse.</param>
@@ -294,7 +306,17 @@ namespace System.Net.ServerSentEvents
                 }
                 else if (_lineLength == _lineBuffer.Length)
                 {
-                    GrowBuffer(ref _lineBuffer, _lineBuffer.Length * 2);
+                    int newLength;
+                    try
+                    {
+                        newLength = checked(_lineBuffer.Length * 2);
+                    }
+                    catch (OverflowException)
+                    {
+                        throw new InvalidDataException(SR.InvalidDataException_SseExceededMaxLength);
+                    }
+
+                    GrowBuffer(ref _lineBuffer, newLength);
                 }
             }
         }
@@ -314,8 +336,11 @@ namespace System.Net.ServerSentEvents
 
                 if (_dataAppended)
                 {
-                    sseItem = new SseItem<T>(_itemParser(_eventType, _dataBuffer.AsSpan(0, _dataLength)), _eventType);
-                    _eventType = SseParser.EventTypeDefault;
+                    T data = _itemParser(_eventType ?? SseParser.EventTypeDefault, _dataBuffer.AsSpan(0, _dataLength));
+                    sseItem = new SseItem<T>(data, _eventType) { EventId = _eventId, ReconnectionInterval = _nextReconnectionInterval };
+                    _eventType = null;
+                    _eventId = null;
+                    _nextReconnectionInterval = null;
                     _dataLength = 0;
                     _dataAppended = false;
                     return true;
@@ -365,16 +390,29 @@ namespace System.Net.ServerSentEvents
                         (remainder[0] is LF || (remainder[0] is CR && remainder.Length > 1)))
                     {
                         advance = line.Length + newlineLength + (remainder.StartsWith(CRLF) ? 2 : 1);
-                        sseItem = new SseItem<T>(_itemParser(_eventType, fieldValue), _eventType);
-                        _eventType = SseParser.EventTypeDefault;
+                        T data = _itemParser(_eventType ?? SseParser.EventTypeDefault, fieldValue);
+                        sseItem = new SseItem<T>(data, _eventType) { EventId = _eventId, ReconnectionInterval = _nextReconnectionInterval };
+                        _eventType = null;
+                        _eventId = null;
+                        _nextReconnectionInterval = null;
                         return true;
                     }
                 }
 
-                // We need to copy the data from the data buffer to the line buffer. Make sure there's enough room.
-                if (_dataBuffer is null || _dataLength + _lineLength + 1 > _dataBuffer.Length)
+                // We need to copy the data from the line buffer to the data buffer. Make sure there's enough room.
+                int newLength;
+                try
                 {
-                    GrowBuffer(ref _dataBuffer, _dataLength + _lineLength + 1);
+                    newLength = checked(_dataLength + _lineLength + 1);
+                }
+                catch (OverflowException)
+                {
+                    throw new InvalidDataException(SR.InvalidDataException_SseExceededMaxLength);
+                }
+
+                if (_dataBuffer is null || newLength > _dataBuffer.Length)
+                {
+                    GrowBuffer(ref _dataBuffer, newLength);
                 }
 
                 // Append a newline if there's already content in the buffer.
@@ -390,15 +428,15 @@ namespace System.Net.ServerSentEvents
             else if (fieldName.SequenceEqual("event"u8))
             {
                 // Spec: "Set the event type buffer to field value."
-                _eventType = SseParser.Utf8GetString(fieldValue);
+                _eventType = Encoding.UTF8.GetString(fieldValue);
             }
             else if (fieldName.SequenceEqual("id"u8))
             {
                 // Spec: "If the field value does not contain U+0000 NULL, then set the last event ID buffer to the field value. Otherwise, ignore the field."
-                if (fieldValue.IndexOf((byte)'\0') < 0)
+                if (!fieldValue.Contains((byte)'\0'))
                 {
                     // Note that fieldValue might be empty, in which case LastEventId will naturally be reset to the empty string. This is per spec.
-                    LastEventId = SseParser.Utf8GetString(fieldValue);
+                    LastEventId = _eventId = Encoding.UTF8.GetString(fieldValue);
                 }
             }
             else if (fieldName.SequenceEqual("retry"u8))
@@ -409,11 +447,14 @@ namespace System.Net.ServerSentEvents
 #if NET
                     fieldValue,
 #else
-                    SseParser.Utf8GetString(fieldValue),
+                    Encoding.UTF8.GetString(fieldValue),
 #endif
-                    NumberStyles.None, CultureInfo.InvariantCulture, out long milliseconds))
+                    NumberStyles.None, CultureInfo.InvariantCulture, out long milliseconds) &&
+                    0 <= milliseconds && milliseconds <= TimeSpan_MaxValueMilliseconds)
                 {
-                    ReconnectionInterval = TimeSpan.FromMilliseconds(milliseconds);
+                    // Workaround for TimeSpan.FromMilliseconds not being able to roundtrip TimeSpan.MaxValue
+                    TimeSpan timeSpan = milliseconds == TimeSpan_MaxValueMilliseconds ? TimeSpan.MaxValue : TimeSpan.FromMilliseconds(milliseconds);
+                    _nextReconnectionInterval = ReconnectionInterval = timeSpan;
                 }
             }
             else
@@ -482,13 +523,7 @@ namespace System.Net.ServerSentEvents
             ShiftOrGrowLineBufferIfNecessary();
 
             int offset = _lineOffset + _lineLength;
-            int bytesRead = await
-#if NET
-                _stream.ReadAsync(_lineBuffer.AsMemory(offset), cancellationToken)
-#else
-                new ValueTask<int>(_stream.ReadAsync(_lineBuffer, offset, _lineBuffer.Length - offset, cancellationToken))
-#endif
-                .ConfigureAwait(false);
+            int bytesRead = await _stream.ReadAsync(_lineBuffer.AsMemory(offset), cancellationToken).ConfigureAwait(false);
 
             if (bytesRead > 0)
             {
@@ -519,8 +554,13 @@ namespace System.Net.ServerSentEvents
         }
 
         /// <summary>Grows the buffer, returning the existing one to the ArrayPool and renting an ArrayPool replacement.</summary>
-        private static void GrowBuffer([NotNull] ref byte[]? buffer, int minimumLength)
+        private void GrowBuffer([NotNull] ref byte[]? buffer, int minimumLength)
         {
+            if (minimumLength > _maxBufferSize)
+            {
+                throw new InvalidDataException(SR.InvalidDataException_SseExceededMaxLength);
+            }
+
             byte[]? toReturn = buffer;
             buffer = ArrayPool<byte>.Shared.Rent(Math.Max(minimumLength, DefaultArrayPoolRentSize));
             if (toReturn is not null)

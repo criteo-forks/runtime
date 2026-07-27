@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 #include "pal_config.h"
+#include "pal_errno.h"
 #include "pal_threading.h"
 
 #include <limits.h>
@@ -12,6 +13,7 @@
 #include <errno.h>
 #include <time.h>
 #include <sys/time.h>
+#include <minipal/thread.h>
 #if HAVE_SCHED_GETCPU
 #include <sched.h>
 #endif
@@ -20,7 +22,19 @@
 // So we can use the declaration of pthread_cond_timedwait_relative_np
 #undef _XOPEN_SOURCE
 #endif
+
+#if defined(TARGET_LINUX)
+#include <linux/futex.h>      /* Definition of FUTEX_* constants */
+#include <sys/syscall.h>      /* Definition of SYS_* constants */
+#include <unistd.h>           /* Declaration of syscall */
+#endif
+
 #include <pthread.h>
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wjump-misses-init"
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // LowLevelMonitor - Represents a non-recursive mutex and condition
@@ -62,7 +76,7 @@ LowLevelMonitor* SystemNative_LowLevelMonitor_Create(void)
         return NULL;
     }
 
-#if HAVE_PTHREAD_CONDATTR_SETCLOCK && HAVE_CLOCK_MONOTONIC
+#if HAVE_PTHREAD_CONDATTR_SETCLOCK
     pthread_condattr_t conditionAttributes;
     error = pthread_condattr_init(&conditionAttributes);
     if (error != 0)
@@ -80,9 +94,9 @@ LowLevelMonitor* SystemNative_LowLevelMonitor_Create(void)
 
     error = pthread_cond_init(&monitor->Condition, &conditionAttributes);
 
-    int condAttrDestroyError = pthread_condattr_destroy(&conditionAttributes);
+    int condAttrDestroyError;
+    condAttrDestroyError = pthread_condattr_destroy(&conditionAttributes);
     assert(condAttrDestroyError == 0);
-    (void)condAttrDestroyError; // unused in release build
 #else
     error = pthread_cond_init(&monitor->Condition, NULL);
 #endif
@@ -116,8 +130,6 @@ void SystemNative_LowLevelMonitor_Destroy(LowLevelMonitor* monitor)
     error = pthread_mutex_destroy(&monitor->Mutex);
     assert(error == 0);
 
-    (void)error; // unused in release build
-
     free(monitor);
 }
 
@@ -125,9 +137,10 @@ void SystemNative_LowLevelMonitor_Acquire(LowLevelMonitor* monitor)
 {
     assert(monitor != NULL);
 
-    int error = pthread_mutex_lock(&monitor->Mutex);
+    int error;
+
+    error = pthread_mutex_lock(&monitor->Mutex);
     assert(error == 0);
-    (void)error; // unused in release build
 
     SetIsLocked(monitor, true);
 }
@@ -138,9 +151,10 @@ void SystemNative_LowLevelMonitor_Release(LowLevelMonitor* monitor)
 
     SetIsLocked(monitor, false);
 
-    int error = pthread_mutex_unlock(&monitor->Mutex);
+    int error;
+
+    error = pthread_mutex_unlock(&monitor->Mutex);
     assert(error == 0);
-    (void)error; // unused in release build
 }
 
 void SystemNative_LowLevelMonitor_Wait(LowLevelMonitor* monitor)
@@ -149,9 +163,10 @@ void SystemNative_LowLevelMonitor_Wait(LowLevelMonitor* monitor)
 
     SetIsLocked(monitor, false);
 
-    int error = pthread_cond_wait(&monitor->Condition, &monitor->Mutex);
+    int error;
+
+    error = pthread_cond_wait(&monitor->Condition, &monitor->Mutex);
     assert(error == 0);
-    (void)error; // unused in release build
 
     SetIsLocked(monitor, true);
 }
@@ -173,7 +188,7 @@ int32_t SystemNative_LowLevelMonitor_TimedWait(LowLevelMonitor *monitor, int32_t
 
     error = pthread_cond_timedwait_relative_np(&monitor->Condition, &monitor->Mutex, &timeoutTimeSpec);
 #else
-#if HAVE_PTHREAD_CONDATTR_SETCLOCK && HAVE_CLOCK_MONOTONIC
+#if HAVE_PTHREAD_CONDATTR_SETCLOCK
     error = clock_gettime(CLOCK_MONOTONIC, &timeoutTimeSpec);
     assert(error == 0);
 #else
@@ -211,9 +226,80 @@ void SystemNative_LowLevelMonitor_Signal_Release(LowLevelMonitor* monitor)
 
     error = pthread_mutex_unlock(&monitor->Mutex);
     assert(error == 0);
-
-    (void)error; // unused in release build
 }
+
+#if defined(TARGET_LINUX)
+void SystemNative_LowLevelFutex_WaitOnAddress(int32_t* address, int32_t comparand)
+{
+    syscall(SYS_futex, address, FUTEX_WAIT_PRIVATE, comparand, NULL, NULL, 0);
+}
+
+int32_t SystemNative_LowLevelFutex_WaitOnAddressTimeout(int32_t* address, int32_t comparand, int32_t timeoutMilliseconds)
+{
+    assert(timeoutMilliseconds >= 0);
+
+    struct timespec timeoutTimeSpec;
+    timeoutTimeSpec.tv_sec  = (uint32_t)timeoutMilliseconds / 1000;
+    timeoutTimeSpec.tv_nsec = ((uint32_t)timeoutMilliseconds % 1000) * 1000 * 1000;
+
+    // the timeoutTimeSpec is relative timeout with CLOCK_MONOTONIC clock by default.
+    long waitResult = syscall(SYS_futex, address, FUTEX_WAIT_PRIVATE, comparand, &timeoutTimeSpec, NULL, 0);
+
+    // possible results: woken, not blocking, interrupted, timeout
+    assert(waitResult == 0 || errno == EAGAIN || errno == EINTR || errno == ETIMEDOUT);
+
+    // normal/immediate/spurious wakes are not timeouts
+    // in release treat unexpected results as spurious wakes
+    return waitResult == 0 || errno != ETIMEDOUT;
+}
+
+void SystemNative_LowLevelFutex_WakeByAddressSingle(int32_t* address)
+{
+    syscall(SYS_futex, address, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+}
+#else // defined(TARGET_LINUX)
+
+// On illumos/Solaris libc's assert is not annotated noreturn, so marking these stubs noreturn would
+// trigger -Winvalid-noreturn there. Only apply the attribute on other platforms.
+#if defined(DEBUG) && !defined(TARGET_SUNOS)
+#define DEBUGNOTRETURN __attribute__((noreturn))
+#else
+#define DEBUGNOTRETURN
+#endif
+
+DEBUGNOTRETURN
+void SystemNative_LowLevelFutex_WaitOnAddress(int32_t* address, int32_t comparand)
+{
+    (void)address; // unused
+    (void)comparand; // unused
+    assert_msg(false, "Futex is not supported on this platform", 0);
+    // trivial implementation of Wait always wakes spuriously.
+}
+
+DEBUGNOTRETURN
+int32_t SystemNative_LowLevelFutex_WaitOnAddressTimeout(int32_t* address, int32_t comparand, int32_t timeoutMilliseconds)
+{
+    (void)address; // unused
+    (void)comparand; // unused
+    (void)timeoutMilliseconds; // unused
+    assert_msg(false, "Futex is not supported on this platform", 0);
+#if !defined(DEBUG) || defined(TARGET_SUNOS)
+    // trivial implementation of Wait always wakes spuriously.
+    return 1;
+#endif
+}
+
+DEBUGNOTRETURN
+void SystemNative_LowLevelFutex_WakeByAddressSingle(int32_t* address)
+{
+    (void)address; // unused
+    assert_msg(false, "Futex is not supported on this platform", 0);
+    // trivial implementation of Wake does nothing.
+}
+
+#undef DEBUGNOTRETURN
+
+#endif  // defined(TARGET_LINUX)
 
 int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter)
 {
@@ -286,47 +372,13 @@ void SystemNative_Abort(void)
 // Gets a non-truncated OS thread ID that is also suitable for diagnostics, for platforms that offer a 64-bit ID
 uint64_t SystemNative_GetUInt64OSThreadId(void)
 {
-#ifdef __APPLE__
-    uint64_t threadId;
-    int result = pthread_threadid_np(pthread_self(), &threadId);
-    assert(result == 0);
-    return threadId;
-#else
-    assert(false);
-    return 0;
-#endif
+    return (uint64_t)minipal_get_current_thread_id();
 }
-
-#if defined(__linux__)
-#include <sys/syscall.h>
-#include <unistd.h>
-#elif defined(__FreeBSD__)
-#include <pthread_np.h>
-#elif defined(__NetBSD__)
-#include <lwp.h>
-#endif
 
 // Tries to get a non-truncated OS thread ID that is also suitable for diagnostics, for platforms that offer a 32-bit ID.
 // Returns (uint32_t)-1 when the implementation does not know how to get the OS thread ID.
 uint32_t SystemNative_TryGetUInt32OSThreadId(void)
 {
-    const uint32_t InvalidId = (uint32_t)-1;
-
-#if defined(__linux__)
-    assert(sizeof(pid_t) == sizeof(uint32_t));
-    uint32_t threadId = (uint32_t)syscall(SYS_gettid);
-    assert(threadId != InvalidId);
-    return threadId;
-#elif defined(__FreeBSD__)
-    uint32_t threadId = (uint32_t)pthread_getthreadid_np();
-    assert(threadId != InvalidId);
-    return threadId;
-#elif defined(__NetBSD__)
-    assert(sizeof(lwpid_t) == sizeof(uint32_t));
-    uint32_t threadId = (uint32_t)_lwp_self();
-    assert(threadId != InvalidId);
-    return threadId;
-#else
-    return InvalidId;
-#endif
+    uint32_t result = (uint32_t)minipal_get_current_thread_id();
+    return result == 0 ? (uint32_t)-1 : result;
 }

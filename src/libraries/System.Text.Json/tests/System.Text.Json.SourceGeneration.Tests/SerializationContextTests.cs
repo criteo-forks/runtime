@@ -56,6 +56,7 @@ namespace System.Text.Json.SourceGeneration.Tests
     [JsonSerializable(typeof(PolymorphicClass))]
     [JsonSerializable(typeof(PocoWithNumberHandlingAttr))]
     [JsonSerializable(typeof(PocoWithMixedVisibilityMembers))]
+    [JsonSerializable(typeof(ClassWithConflictingIgnoredProperties))]
     internal partial class SerializationContext : JsonSerializerContext, ITestContext
     {
         public JsonSourceGenerationMode JsonSourceGenerationMode => JsonSourceGenerationMode.Serialization;
@@ -422,7 +423,7 @@ namespace System.Text.Json.SourceGeneration.Tests
         [Fact]
         public override void HandlesNestedTypes()
         {
-            string json = @"{""MyInt"":5}";
+            string json = """{"MyInt":5}""";
             MyNestedClass obj = JsonSerializer.Deserialize<MyNestedClass>(json, ((ITestContext)MetadataWithPerTypeAttributeContext.Default).MyNestedClass);
             Assert.Equal(5, obj.MyInt);
             Assert.Equal(json, JsonSerializer.Serialize(obj, DefaultContext.MyNestedClass));
@@ -454,6 +455,7 @@ namespace System.Text.Json.SourceGeneration.Tests
             {
                 Uri = new Uri("http://contoso.com"),
                 Array = new int[] { 42 },
+                ByteArray = new byte[] { 1, 2, 3 },
                 Poco = new ClassWithNullableProperties.MyPoco(),
 
                 NullableUri = new Uri("http://contoso.com"),
@@ -466,10 +468,17 @@ namespace System.Text.Json.SourceGeneration.Tests
             void RunTest(ClassWithNullableProperties expected)
             {
                 string json = JsonSerializer.Serialize(expected, DefaultContext.ClassWithNullableProperties);
+
+                if (expected.ByteArray is null)
+                {
+                    Assert.Contains("\"ByteArray\":null", json);
+                }
+
                 ClassWithNullableProperties actual = JsonSerializer.Deserialize(json, ((ITestContext)MetadataWithPerTypeAttributeContext.Default).ClassWithNullableProperties);
 
                 Assert.Equal(expected.Uri, actual.Uri);
                 Assert.Equal(expected.Array, actual.Array);
+                Assert.Equal(expected.ByteArray, actual.ByteArray);
                 Assert.Equal(expected.Poco, actual.Poco);
 
                 Assert.Equal(expected.NullableUri, actual.NullableUri);
@@ -515,8 +524,12 @@ namespace System.Text.Json.SourceGeneration.Tests
         public override void ParameterizedConstructor()
         {
             string json = JsonSerializer.Serialize(new HighLowTempsImmutable(1, 2), DefaultContext.HighLowTempsImmutable);
-            Assert.Contains(@"""High"":1", json);
-            Assert.Contains(@"""Low"":2", json);
+            Assert.Contains("""
+                "High":1
+                """, json);
+            Assert.Contains("""
+                "Low":2
+                """, json);
 
             JsonTestHelper.AssertThrows_PropMetadataInit(() => JsonSerializer.Deserialize(json, DefaultContext.HighLowTempsImmutable), typeof(HighLowTempsImmutable));
         }
@@ -525,8 +538,12 @@ namespace System.Text.Json.SourceGeneration.Tests
         public override void PositionalRecord()
         {
             string json = JsonSerializer.Serialize(new HighLowTempsRecord(1, 2), DefaultContext.HighLowTempsRecord);
-            Assert.Contains(@"""High"":1", json);
-            Assert.Contains(@"""Low"":2", json);
+            Assert.Contains("""
+                "High":1
+                """, json);
+            Assert.Contains("""
+                "Low":2
+                """, json);
 
             JsonTestHelper.AssertThrows_PropMetadataInit(() => JsonSerializer.Deserialize(json, DefaultContext.HighLowTempsRecord), typeof(HighLowTempsRecord));
         }
@@ -552,9 +569,34 @@ namespace System.Text.Json.SourceGeneration.Tests
             };
 
             string json = JsonSerializer.Serialize(person, DefaultContext.NullablePersonStruct);
-            JsonTestHelper.AssertJsonEqual(@"{""FirstName"":""Jane"",""LastName"":""Doe""}", json);
+            JsonTestHelper.AssertJsonEqual("""{"FirstName":"Jane","LastName":"Doe"}""", json);
 
             Assert.Throws<InvalidOperationException>(() => JsonSerializer.Deserialize(json, DefaultContext.NullablePersonStruct));
+        }
+
+        [Fact]
+        public void ClassWithConflictingIgnoredProperties_FastPathSerialization()
+        {
+            // Regression test for https://github.com/dotnet/runtime/issues/99988
+
+            ClassWithConflictingIgnoredProperties value = new()
+            {
+                SystemTextJsonUserList = ["root"],
+                SystemTextJsonUserGroupsList = ["wheel"],
+                SystemTextJsonIPAddresses = ["127.0.0.1"],
+                SystemTextJsonQueryParams = ["key=value"],
+            };
+
+            string json = JsonSerializer.Serialize(value, SerializationContext.Default.ClassWithConflictingIgnoredProperties);
+
+            JsonTestHelper.AssertJsonEqual("""
+                {
+                    "userlist" : ["root"],
+                    "usergroupslist" : ["wheel"],
+                    "SystemTextJsonIPAddresses" : ["127.0.0.1"],
+                    "queryparams" : ["key=value"]
+                }
+                """, json);
         }
     }
 

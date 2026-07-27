@@ -12,6 +12,26 @@ namespace System.Text.RegularExpressions
 {
     public partial class Regex
     {
+        /// <summary>
+        /// Gets or sets the maximum number of entries in the current static cache of regular expression
+        /// instances.
+        /// </summary>
+        /// <value>The maximum number of entries in the static cache.</value>
+        /// <remarks>
+        /// <para>
+        /// The <see cref="Regex"/> class maintains an internal cache of regular expression instances used in
+        /// static <see cref="Regex"/> method calls, such as <see cref="Regex.Match(string, string)"/> or
+        /// <see cref="Regex.Replace(string, string, string)"/>. If the value specified in a set operation is
+        /// less than the current cache size, cache entries are discarded until the cache size is equal to the
+        /// specified value.
+        /// </para>
+        /// <para>
+        /// By default, the cache holds 15 static regular expression instances. Your application typically
+        /// will not have to modify the size of the cache. Use the <see cref="CacheSize"/> property only when
+        /// you want to turn off caching or when you have an unusually large cache.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value in a set operation is less than zero.</exception>
         public static int CacheSize
         {
             get => RegexCache.MaxCacheSize;
@@ -248,13 +268,22 @@ namespace System.Text.RegularExpressions
                         }
                     }
 
-                    // Remove the key found to have the smallest access stamp.
+                    // Remove the key found to have the smallest access stamp. List ordering isn't important, so rather than
+                    // just removing the element at minListIndex, which would result in an O(N) shift down, we copy the last
+                    // element to minListIndex, and then remove the last. (If minListIndex is the last, this is a no-op.)
                     s_cacheDictionary.TryRemove(s_cacheList[minListIndex].Key, out _);
-                    s_cacheList.RemoveAt(minListIndex);
+                    s_cacheList[minListIndex] = s_cacheList[^1];
+                    s_cacheList.RemoveAt(s_cacheList.Count - 1);
                 }
 
                 // Finally add the regex.
                 var node = new Node(key, regex);
+
+                if (s_lastAccessed is { } lastAccessed)
+                {
+                    node.LastAccessStamp = Volatile.Read(ref lastAccessed.LastAccessStamp) + 1;
+                }
+
                 s_lastAccessed = node;
                 s_cacheList.Add(node);
                 s_cacheDictionary.TryAdd(key, node);

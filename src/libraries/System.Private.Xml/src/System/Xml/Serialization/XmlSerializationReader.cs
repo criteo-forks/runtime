@@ -107,6 +107,8 @@ namespace System.Xml.Serialization
         private string _guidID = null!;
         private string _timeSpanID = null!;
         private string _dateTimeOffsetID = null!;
+        private string _dateOnlyID = null!;
+        private string _timeOnlyID = null!;
 
         protected abstract void InitIDs();
 
@@ -216,6 +218,8 @@ namespace System.Xml.Serialization
             _guidID = _r.NameTable.Add("guid");
             _timeSpanID = _r.NameTable.Add("TimeSpan");
             _dateTimeOffsetID = _r.NameTable.Add("dateTimeOffset");
+            _dateOnlyID = _r.NameTable.Add("dateOnly");
+            _timeOnlyID = _r.NameTable.Add("timeOnly");
             _base64ID = _r.NameTable.Add("base64");
 
             _anyURIID = _r.NameTable.Add("anyURI");
@@ -671,6 +675,10 @@ namespace System.Xml.Serialization
                     value = XmlConvert.ToTimeSpan(ReadStringValue());
                 else if ((object)type.Name == (object)_dateTimeOffsetID)
                     value = XmlConvert.ToDateTimeOffset(ReadStringValue());
+                else if ((object)type.Name == (object)_dateOnlyID)
+                    value = ToDateOnly(ReadStringValue());
+                else if ((object)type.Name == (object)_timeOnlyID)
+                    value = ToTimeOnly(ReadStringValue());
                 else
                     value = ReadXmlNodes(elementCanBeType);
             }
@@ -770,6 +778,10 @@ namespace System.Xml.Serialization
                     value = default(Nullable<TimeSpan>);
                 else if ((object)type.Name == (object)_dateTimeOffsetID)
                     value = default(Nullable<DateTimeOffset>);
+                else if ((object)type.Name == (object)_dateOnlyID)
+                    value = default(Nullable<DateOnly>);
+                else if ((object)type.Name == (object)_timeOnlyID)
+                    value = default(Nullable<TimeOnly>);
                 else
                     value = null;
             }
@@ -893,6 +905,11 @@ namespace System.Xml.Serialization
             if (wrapped)
             {
                 if (ReadNull()) return null;
+                if (!LocalAppContextSwitches.UseLegacyEmptyXmlElementDeserialization && _r.IsEmptyElement)
+                {
+                    _r.Skip();
+                    return null;
+                }
                 _r.ReadStartElement();
                 _r.MoveToContent();
                 if (_r.NodeType != XmlNodeType.EndElement)
@@ -1092,9 +1109,24 @@ namespace System.Xml.Serialization
             return XmlCustomFormatter.ToDate(value);
         }
 
+        protected static DateOnly ToDateOnly(string value)
+        {
+            return XmlCustomFormatter.ToDateOnly(value);
+        }
+
         protected static DateTime ToTime(string value)
         {
             return XmlCustomFormatter.ToTime(value);
+        }
+
+        protected static TimeOnly ToTimeOnly(string value)
+        {
+            return XmlCustomFormatter.ToTimeOnly(value);
+        }
+
+        protected static TimeOnly ToTimeOnlyIgnoreOffset(string value)
+        {
+            return XmlCustomFormatter.ToTimeOnlyIgnoreOffset(value);
         }
 
         protected static char ToChar(string value)
@@ -1341,6 +1373,7 @@ namespace System.Xml.Serialization
             //XmlSerializableMissingClrType= Type '{0}' from namespace '{1}' doesnot have corresponding IXmlSerializable type. Please consider adding {2} to '{3}'.
         }
 
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected Array EnsureArrayIndex(Array? a, int index, Type elementType)
         {
             if (a == null) return Array.CreateInstance(elementType, 32);
@@ -1350,6 +1383,7 @@ namespace System.Xml.Serialization
             return b;
         }
 
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected Array? ShrinkArray(Array? a, int length, Type elementType, bool isNullable)
         {
             if (a == null)
@@ -1548,6 +1582,7 @@ namespace System.Xml.Serialization
         }
 
         [RequiresUnreferencedCode("calls GetArrayElementType")]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         private Array? ReadArray(string? typeName, string? typeNs)
         {
             SoapArrayInfo arrayInfo;
@@ -1748,9 +1783,11 @@ namespace System.Xml.Serialization
         }
 
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected abstract void InitCallbacks();
 
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected void ReadReferencedElements()
         {
             _r.MoveToContent();
@@ -1765,24 +1802,28 @@ namespace System.Xml.Serialization
         }
 
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected object? ReadReferencedElement()
         {
             return ReadReferencedElement(null, null);
         }
 
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected object? ReadReferencedElement(string? name, string? ns)
         {
             return ReadReferencingElement(name, ns, out _);
         }
 
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected object? ReadReferencingElement(out string? fixupReference)
         {
             return ReadReferencingElement(null, null, out fixupReference);
         }
 
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected object? ReadReferencingElement(string? name, string? ns, out string? fixupReference)
         {
             return ReadReferencingElement(name, ns, false, out fixupReference);
@@ -1790,6 +1831,7 @@ namespace System.Xml.Serialization
 
         [MemberNotNull(nameof(_callbacks))]
         [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         protected object? ReadReferencingElement(string? name, string? ns, bool elementCanBeType, out string? fixupReference)
         {
             object? o;
@@ -1829,6 +1871,7 @@ namespace System.Xml.Serialization
 
         [MemberNotNull(nameof(_callbacks))]
         [RequiresUnreferencedCode("calls InitCallbacks")]
+        [RequiresDynamicCode(XmlSerializer.AotSerializationWarning)]
         internal void EnsureCallbackTables()
         {
             if (_callbacks == null)
@@ -1854,8 +1897,24 @@ namespace System.Xml.Serialization
         protected void ReadEndElement()
         {
             while (_r.NodeType == XmlNodeType.Whitespace) _r.Skip();
-            if (_r.NodeType == XmlNodeType.None) _r.Skip();
-            else _r.ReadEndElement();
+
+            if (LocalAppContextSwitches.UseXmlSerializerReadEndElementWorkaround)
+            {
+                if (_r.NodeType == XmlNodeType.None)
+                    return;
+
+                // Avoid forcing the reader to pull one more token after completing a top-level element.
+                // In fragment scenarios over streaming transports, additional data may not be immediately
+                // available even though deserialization of the current element is already complete.
+                if (_r.NodeType == XmlNodeType.EndElement && _r.Depth == 0)
+                    return;
+            }
+            else if (_r.NodeType == XmlNodeType.None)
+            {
+                _r.Skip();
+            }
+
+            _r.ReadEndElement();
         }
 
         private object ReadXmlNodes(bool elementCanBeType)
@@ -2032,12 +2091,11 @@ namespace System.Xml.Serialization
     internal sealed class XmlSerializationReaderCodeGen : XmlSerializationCodeGen
     {
         private readonly Hashtable _idNames = new Hashtable();
-        private Hashtable? _enums;
         private readonly Hashtable _createMethods = new Hashtable();
         private int _nextCreateMethodNumber;
         private int _nextIdNumber;
 
-        internal Hashtable Enums => _enums ??= new Hashtable();
+        internal Hashtable Enums => field ??= new Hashtable();
 
         private sealed class CreateCollectionInfo
         {
@@ -4665,7 +4723,8 @@ namespace System.Xml.Serialization
                 }
                 Writer.Indent++;
 
-                if (element.Mapping.TypeDesc!.Type == typeof(TimeSpan) || element.Mapping.TypeDesc!.Type == typeof(DateTimeOffset))
+                if (element.Mapping.TypeDesc!.Type == typeof(TimeSpan) || element.Mapping.TypeDesc!.Type == typeof(DateTimeOffset)
+                    || element.Mapping.TypeDesc!.Type == typeof(DateOnly) || element.Mapping.TypeDesc!.Type == typeof(TimeOnly))
                 {
                     Writer.WriteLine("if (Reader.IsEmptyElement) {");
                     Writer.Indent++;
@@ -4678,6 +4737,14 @@ namespace System.Xml.Serialization
                     else if (element.Mapping.TypeDesc!.Type == typeof(DateTimeOffset))
                     {
                         Writer.Write("default(System.DateTimeOffset)");
+                    }
+                    else if (element.Mapping.TypeDesc!.Type == typeof(DateOnly))
+                    {
+                        Writer.Write("default(System.DateOnly)");
+                    }
+                    else if (element.Mapping.TypeDesc!.Type == typeof(TimeOnly))
+                    {
+                        Writer.Write("default(System.TimeOnly)");
                     }
                     WriteSourceEnd(source);
                     Writer.WriteLine(";");

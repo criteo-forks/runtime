@@ -19,8 +19,6 @@ namespace Microsoft.Extensions.Http.Logging
         private readonly ILogger _logger;
         private readonly HttpClientFactoryOptions? _options;
 
-        private static readonly Func<string, bool> _shouldNotRedactHeaderValue = (header) => false;
-
         /// <summary>
         /// Initializes a new instance of the <see cref="LoggingHttpMessageHandler"/> class with a specified logger.
         /// </summary>
@@ -28,7 +26,7 @@ namespace Microsoft.Extensions.Http.Logging
         /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
         public LoggingHttpMessageHandler(ILogger logger)
         {
-            ThrowHelper.ThrowIfNull(logger);
+            ArgumentNullException.ThrowIfNull(logger);
 
             _logger = logger;
         }
@@ -41,8 +39,8 @@ namespace Microsoft.Extensions.Http.Logging
         /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
         public LoggingHttpMessageHandler(ILogger logger, HttpClientFactoryOptions options)
         {
-            ThrowHelper.ThrowIfNull(logger);
-            ThrowHelper.ThrowIfNull(options);
+            ArgumentNullException.ThrowIfNull(logger);
+            ArgumentNullException.ThrowIfNull(options);
 
             _logger = logger;
             _options = options;
@@ -50,27 +48,36 @@ namespace Microsoft.Extensions.Http.Logging
 
         private Task<HttpResponseMessage> SendCoreAsync(HttpRequestMessage request, bool useAsync, CancellationToken cancellationToken)
         {
-            ThrowHelper.ThrowIfNull(request);
+            ArgumentNullException.ThrowIfNull(request);
             return Core(request, useAsync, cancellationToken);
 
             async Task<HttpResponseMessage> Core(HttpRequestMessage request, bool useAsync, CancellationToken cancellationToken)
             {
-                Func<string, bool> shouldRedactHeaderValue = _options?.ShouldRedactHeaderValue ?? _shouldNotRedactHeaderValue;
+                Func<string, bool> shouldRedactHeaderValue = _options?.ShouldRedactHeaderValue ?? LogHelper.ShouldRedactHeaderValue;
 
                 // Not using a scope here because we always expect this to be at the end of the pipeline, thus there's
                 // not really anything to surround.
                 _logger.LogRequestStart(request, shouldRedactHeaderValue);
                 var stopwatch = ValueStopwatch.StartNew();
-                HttpResponseMessage response = useAsync
-                    ? await base.SendAsync(request, cancellationToken).ConfigureAwait(false)
-#if NET
-                    : base.Send(request, cancellationToken);
-#else
-                    : throw new NotImplementedException("Unreachable code");
-#endif
-                _logger.LogRequestEnd(response, stopwatch.GetElapsedTime(), shouldRedactHeaderValue);
 
-                return response;
+                try
+                {
+                    HttpResponseMessage response = useAsync
+                        ? await base.SendAsync(request, cancellationToken).ConfigureAwait(false)
+#if NET
+                        : base.Send(request, cancellationToken);
+#else
+                        : throw new NotImplementedException("Unreachable code");
+#endif
+                    _logger.LogRequestEnd(response, stopwatch.GetElapsedTime(), shouldRedactHeaderValue);
+
+                    return response;
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogRequestFailed(stopwatch.GetElapsedTime(), ex);
+                    throw;
+                }
             }
         }
 

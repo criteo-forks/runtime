@@ -15,6 +15,7 @@
 #include "metadata.h"
 #include "metamodelro.h"
 #include "metamodelrw.h"
+#include "cdacdata.h"
 
 #include "stgtiggerstorage.h"
 
@@ -25,14 +26,7 @@ class StgIO;
 #include "pdbheap.h"
 #endif
 
-#ifdef _PREFAST_
-#pragma warning(push)
-#pragma warning(disable:28718)    // public header missing SAL annotations
-#endif // _PREFAST_
 class TiggerStorage;
-#ifdef _PREFAST_
-#pragma warning(pop)
-#endif // _PREFAST_
 
 //*****************************************************************************
 // This class provides common definitions for heap segments.  It is both the
@@ -86,6 +80,7 @@ void CLiteWeightStgdb<MiniMd>::Uninit()
 
 class CLiteWeightStgdbRW : public CLiteWeightStgdb<CMiniMdRW>
 {
+    friend struct ::cdac_data<CLiteWeightStgdbRW>;
     friend class RegMeta;
     friend class VerifyLayoutsMD;
     friend HRESULT TranslateSigHelper(
@@ -106,8 +101,6 @@ public:
         m_pImage = NULL;
         m_dwImageSize = 0;
         m_dwPEKind = (DWORD)(-1);
-        m_dwDatabaseLFS = 0;
-        m_dwDatabaseLFT = 0;
 #ifdef FEATURE_METADATA_EMIT_PORTABLE_PDB
         m_pPdbHeap = NULL;
 #endif
@@ -238,12 +231,17 @@ public:
 private:
     FILETYPE m_eFileType;
     WCHAR *  m_wszFileName;     // Database file name (NULL or non-empty string)
-    DWORD    m_dwDatabaseLFT;   // Low bytes of the database file's last write time
-    DWORD    m_dwDatabaseLFS;   // Low bytes of the database file's size
     StgIO *  m_pStgIO;          // For file i/o.
 #ifdef FEATURE_METADATA_EMIT_PORTABLE_PDB
     PdbHeap *m_pPdbHeap;
 #endif
 };  // class CLiteWeightStgdbRW
+
+template<>
+struct cdac_data<CLiteWeightStgdbRW>
+{
+    static constexpr size_t MiniMd = offsetof(CLiteWeightStgdbRW, m_MiniMd);
+    static constexpr size_t MetadataAddress = offsetof(CLiteWeightStgdbRW, m_pvMd);
+};
 
 #endif // __LiteWeightStgdb_h__

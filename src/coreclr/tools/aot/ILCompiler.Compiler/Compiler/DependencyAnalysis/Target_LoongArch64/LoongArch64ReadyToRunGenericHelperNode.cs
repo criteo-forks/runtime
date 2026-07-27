@@ -76,6 +76,7 @@ namespace ILCompiler.DependencyAnalysis
                             // We need to trigger the cctor before returning the base. It is stored at the beginning of the non-GC statics region.
                             encoder.EmitADD(encoder.TargetRegister.Arg3, encoder.TargetRegister.Arg0, -NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
                             encoder.EmitLD(encoder.TargetRegister.Arg2, encoder.TargetRegister.Arg3, 0);
+                            encoder.EmitDBAR();
                             encoder.EmitXOR(encoder.TargetRegister.IntraProcedureCallScratch1, encoder.TargetRegister.Arg2, 0);
                             encoder.EmitRETIfEqual(Register.R21);
 
@@ -108,6 +109,7 @@ namespace ILCompiler.DependencyAnalysis
 
                             encoder.EmitADD(encoder.TargetRegister.Arg2, encoder.TargetRegister.Arg2, -NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
                             encoder.EmitLD(encoder.TargetRegister.Arg3, encoder.TargetRegister.Arg2, factory.Target.PointerSize);
+                            encoder.EmitDBAR();
                             encoder.EmitXOR(encoder.TargetRegister.IntraProcedureCallScratch1, encoder.TargetRegister.Arg3, 1);
                             encoder.EmitRETIfEqual(Register.R21);
 
@@ -186,11 +188,13 @@ namespace ILCompiler.DependencyAnalysis
 
                 // These are all simple: just get the thing from the dictionary and we're done
                 case ReadyToRunHelperId.TypeHandle:
+                case ReadyToRunHelperId.NecessaryTypeHandle:
+                case ReadyToRunHelperId.MetadataTypeHandle:
                 case ReadyToRunHelperId.MethodHandle:
                 case ReadyToRunHelperId.FieldHandle:
                 case ReadyToRunHelperId.MethodDictionary:
                 case ReadyToRunHelperId.MethodEntry:
-                case ReadyToRunHelperId.VirtualDispatchCell:
+                case ReadyToRunHelperId.DispatchCell:
                 case ReadyToRunHelperId.DefaultConstructor:
                 case ReadyToRunHelperId.ObjectAllocator:
                 case ReadyToRunHelperId.TypeHandleForCasting:

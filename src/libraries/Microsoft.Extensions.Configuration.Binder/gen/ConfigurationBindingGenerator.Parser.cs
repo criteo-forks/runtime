@@ -30,13 +30,13 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
             private bool _emitEnumParseMethod;
             private bool _emitGenericParseEnum;
 
-            public List<DiagnosticInfo>? Diagnostics { get; private set; }
+            public List<Diagnostic>? Diagnostics { get; private set; }
 
             public SourceGenerationSpec? GetSourceGenerationSpec(ImmutableArray<BinderInvocation?> invocations, CancellationToken cancellationToken)
             {
                 if (!_langVersionIsSupported)
                 {
-                    RecordDiagnostic(DiagnosticDescriptors.LanguageVersionNotSupported, trimmedLocation: Location.None);
+                    RecordDiagnostic(DiagnosticDescriptors.LanguageVersionNotSupported, location: Location.None);
                     return null;
                 }
 
@@ -197,7 +197,7 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 }
                 else if (IsCollection(type))
                 {
-                    spec = CreateCollectionSpec(typeParseInfo);
+                    spec = CreateCollectionSpec(typeParseInfo) ?? CreateObjectSpec(typeParseInfo);
                 }
                 else if (SymbolEqualityComparer.Default.Equals(type, _typeSymbols.IConfigurationSection))
                 {
@@ -360,37 +360,41 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 };
             }
 
-            private TypeSpec CreateCollectionSpec(TypeParseInfo typeParseInfo)
+            private TypeSpec? CreateCollectionSpec(TypeParseInfo typeParseInfo)
             {
                 INamedTypeSymbol type = (INamedTypeSymbol)typeParseInfo.TypeSymbol;
 
-                TypeSpec spec;
+                TypeSpec? spec;
                 if (IsCandidateDictionary(type, out ITypeSymbol? keyType, out ITypeSymbol? elementType))
                 {
                     spec = CreateDictionarySpec(typeParseInfo, keyType, elementType);
-                    Debug.Assert(spec is DictionarySpec or UnsupportedTypeSpec);
+                    Debug.Assert(spec is DictionarySpec or UnsupportedTypeSpec or null);
                 }
                 else
                 {
                     spec = CreateEnumerableSpec(typeParseInfo);
-                    Debug.Assert(spec is EnumerableSpec or UnsupportedTypeSpec);
+                    Debug.Assert(spec is EnumerableSpec or UnsupportedTypeSpec or null);
                 }
 
                 return spec;
             }
 
-            private TypeSpec CreateDictionarySpec(TypeParseInfo typeParseInfo, ITypeSymbol keyTypeSymbol, ITypeSymbol elementTypeSymbol)
+            private TypeSpec? CreateDictionarySpec(TypeParseInfo typeParseInfo, ITypeSymbol keyTypeSymbol, ITypeSymbol elementTypeSymbol)
             {
+                INamedTypeSymbol type = (INamedTypeSymbol)typeParseInfo.TypeSymbol;
+
+                // treat as unsupported if it implements IDictionary<,>, otherwise we'll try to fallback and treat as an object
+                bool isDictionary = _typeSymbols.GenericICollection is not null && GetInterface(type, _typeSymbols.GenericIDictionary_Unbound) is not null;
+
                 if (IsUnsupportedType(keyTypeSymbol) || IsUnsupportedType(elementTypeSymbol))
                 {
-                    return CreateUnsupportedCollectionSpec(typeParseInfo);
+                    return isDictionary ? CreateUnsupportedCollectionSpec(typeParseInfo) : null;
                 }
-
-                INamedTypeSymbol type = (INamedTypeSymbol)typeParseInfo.TypeSymbol;
 
                 CollectionInstantiationStrategy instantiationStrategy;
                 CollectionInstantiationConcreteType instantiationConcreteType;
                 CollectionPopulationCastType populationCastType;
+                bool shouldTryCast = false;
 
                 if (HasPublicParameterLessCtor(type))
                 {
@@ -401,13 +405,15 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                     {
                         populationCastType = CollectionPopulationCastType.NotApplicable;
                     }
-                    else if (_typeSymbols.GenericIDictionary is not null && GetInterface(type, _typeSymbols.GenericIDictionary_Unbound) is not null)
+                    else if (isDictionary)
                     {
+                        // implements IDictionary<,> -- cast to it.
                         populationCastType = CollectionPopulationCastType.IDictionary;
                     }
                     else
                     {
-                        return CreateUnsupportedCollectionSpec(typeParseInfo);
+                        // not a dictionary
+                        return null;
                     }
                 }
                 else if (_typeSymbols.Dictionary is not null &&
@@ -421,16 +427,19 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 {
                     instantiationStrategy = CollectionInstantiationStrategy.LinqToDictionary;
                     instantiationConcreteType = CollectionInstantiationConcreteType.Dictionary;
+                    // is IReadonlyDictionary<,>  -- test cast to IDictionary<,>
                     populationCastType = CollectionPopulationCastType.IDictionary;
+                    shouldTryCast = true;
                 }
                 else
                 {
-                    return CreateUnsupportedCollectionSpec(typeParseInfo);
+                    return isDictionary ? CreateUnsupportedCollectionSpec(typeParseInfo) : null;
                 }
 
                 TypeRef keyTypeRef = EnqueueTransitiveType(typeParseInfo, keyTypeSymbol, DiagnosticDescriptors.DictionaryKeyNotSupported);
                 TypeRef elementTypeRef = EnqueueTransitiveType(typeParseInfo, elementTypeSymbol, DiagnosticDescriptors.ElementTypeNotSupported);
 
+                Debug.Assert(!shouldTryCast || !type.IsValueType, "Should not test cast for value types.");
                 return new DictionarySpec(type)
                 {
                     KeyTypeRef = keyTypeRef,
@@ -438,26 +447,30 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                     InstantiationStrategy = instantiationStrategy,
                     InstantiationConcreteType = instantiationConcreteType,
                     PopulationCastType = populationCastType,
+                    ShouldTryCast = shouldTryCast
                 };
             }
 
-            private TypeSpec CreateEnumerableSpec(TypeParseInfo typeParseInfo)
+            private TypeSpec? CreateEnumerableSpec(TypeParseInfo typeParseInfo)
             {
                 INamedTypeSymbol type = (INamedTypeSymbol)typeParseInfo.TypeSymbol;
 
+                bool isCollection = _typeSymbols.GenericICollection is not null && GetInterface(type, _typeSymbols.GenericICollection_Unbound) is not null;
+
                 if (!TryGetElementType(type, out ITypeSymbol? elementType))
                 {
-                    return CreateUnsupportedCollectionSpec(typeParseInfo);
+                    return isCollection ? CreateUnsupportedCollectionSpec(typeParseInfo) : null;
                 }
 
                 if (IsUnsupportedType(elementType))
                 {
-                    return CreateUnsupportedCollectionSpec(typeParseInfo);
+                    return isCollection ? CreateUnsupportedCollectionSpec(typeParseInfo) : null;
                 }
 
                 CollectionInstantiationStrategy instantiationStrategy;
                 CollectionInstantiationConcreteType instantiationConcreteType;
                 CollectionPopulationCastType populationCastType;
+                bool shouldTryCast = false;
 
                 if (HasPublicParameterLessCtor(type))
                 {
@@ -468,13 +481,15 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                     {
                         populationCastType = CollectionPopulationCastType.NotApplicable;
                     }
-                    else if (_typeSymbols.GenericICollection is not null && GetInterface(type, _typeSymbols.GenericICollection_Unbound) is not null)
+                    else if (isCollection)
                     {
+                        // implements ICollection<> -- cast to it
                         populationCastType = CollectionPopulationCastType.ICollection;
                     }
                     else
                     {
-                        return CreateUnsupportedCollectionSpec(typeParseInfo);
+                        // not a collection
+                        return null;
                     }
                 }
                 else if ((IsInterfaceMatch(type, _typeSymbols.GenericICollection_Unbound) || IsInterfaceMatch(type, _typeSymbols.GenericIList_Unbound)))
@@ -487,7 +502,9 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 {
                     instantiationStrategy = CollectionInstantiationStrategy.CopyConstructor;
                     instantiationConcreteType = CollectionInstantiationConcreteType.List;
+                    // is IEnumerable<> -- test cast to ICollection<>
                     populationCastType = CollectionPopulationCastType.ICollection;
+                    shouldTryCast = true;
                 }
                 else if (IsInterfaceMatch(type, _typeSymbols.ISet_Unbound))
                 {
@@ -499,27 +516,33 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 {
                     instantiationStrategy = CollectionInstantiationStrategy.CopyConstructor;
                     instantiationConcreteType = CollectionInstantiationConcreteType.HashSet;
+                    // is IReadOnlySet<> -- test cast to ISet<>
                     populationCastType = CollectionPopulationCastType.ISet;
+                    shouldTryCast = true;
                 }
                 else if (IsInterfaceMatch(type, _typeSymbols.IReadOnlyList_Unbound) || IsInterfaceMatch(type, _typeSymbols.IReadOnlyCollection_Unbound))
                 {
                     instantiationStrategy = CollectionInstantiationStrategy.CopyConstructor;
                     instantiationConcreteType = CollectionInstantiationConcreteType.List;
+                    // is IReadOnlyList<> or IReadOnlyCollection<> -- test cast to ICollection<>
                     populationCastType = CollectionPopulationCastType.ICollection;
+                    shouldTryCast = true;
                 }
                 else
                 {
-                    return CreateUnsupportedCollectionSpec(typeParseInfo);
+                    return isCollection ? CreateUnsupportedCollectionSpec(typeParseInfo) : null;
                 }
 
                 TypeRef elementTypeRef = EnqueueTransitiveType(typeParseInfo, elementType, DiagnosticDescriptors.ElementTypeNotSupported);
 
+                Debug.Assert(!shouldTryCast || !type.IsValueType, "Should not test cast for value types.");
                 return new EnumerableSpec(type)
                 {
                     ElementTypeRef = elementTypeRef,
                     InstantiationStrategy = instantiationStrategy,
                     InstantiationConcreteType = instantiationConcreteType,
                     PopulationCastType = populationCastType,
+                    ShouldTryCast = shouldTryCast
                 };
             }
 
@@ -529,8 +552,15 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 return conversion.IsReference && conversion.IsImplicit;
             }
 
-            private bool IsUnsupportedType(ITypeSymbol type)
+            private HashSet<ITypeSymbol>? _visitedTypes = new(SymbolEqualityComparer.Default);
+
+            private bool IsUnsupportedType(ITypeSymbol type, HashSet<ITypeSymbol>? visitedTypes = null)
             {
+                if (ContainsErrorType(type))
+                {
+                    return true;
+                }
+
                 if (type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
                 {
                     type = ((INamedTypeSymbol)type).TypeArguments[0]; // extract the T from a Nullable<T>
@@ -546,23 +576,53 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                     return true;
                 }
 
-                if (type is IArrayTypeSymbol arrayTypeSymbol)
+                if (visitedTypes?.Contains(type) is true)
                 {
-                    return arrayTypeSymbol.Rank > 1 || IsUnsupportedType(arrayTypeSymbol.ElementType);
+                    // avoid infinite recursion in nested types like
+                    // public record RecursiveType
+                    // {
+                    //     public TreeElement? Tree { get; set; }
+                    // }
+                    // public sealed class TreeElement : Dictionary<string, TreeElement>;
+                    //
+                    // return false for the second call. The type will continue be checked in the first call anyway.
+                    return false;
                 }
 
-                if (IsCollection(type))
+                IArrayTypeSymbol? arrayTypeSymbol = type as IArrayTypeSymbol;
+                if (arrayTypeSymbol is null)
                 {
-                    INamedTypeSymbol collectionType = (INamedTypeSymbol)type;
+                    if (!IsCollection(type))
+                    {
+                        return false;
+                    }
+                }
 
-                    if (IsCandidateDictionary(collectionType, out ITypeSymbol? keyType, out ITypeSymbol? elementType))
-                    {
-                        return IsUnsupportedType(keyType) || IsUnsupportedType(elementType);
-                    }
-                    else if (TryGetElementType(collectionType, out elementType))
-                    {
-                        return IsUnsupportedType(elementType);
-                    }
+                if (visitedTypes is null)
+                {
+                    visitedTypes = _visitedTypes;
+                    visitedTypes.Clear();
+                }
+
+                visitedTypes.Add(type);
+
+                if (arrayTypeSymbol is not null)
+                {
+                    return arrayTypeSymbol.Rank > 1 || IsUnsupportedType(arrayTypeSymbol.ElementType, visitedTypes);
+                }
+
+                Debug.Assert(IsCollection(type));
+
+                INamedTypeSymbol collectionType = (INamedTypeSymbol)type;
+
+                if (IsCandidateDictionary(collectionType, out ITypeSymbol? keyType, out ITypeSymbol? elementType))
+                {
+                    return IsUnsupportedType(keyType, visitedTypes) || IsUnsupportedType(elementType, visitedTypes);
+                }
+
+                if (TryGetElementType(collectionType, out elementType))
+                {
+                    return IsUnsupportedType(elementType, visitedTypes);
                 }
 
                 return false;
@@ -651,6 +711,7 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 }
 
                 Dictionary<string, PropertySpec>? properties = null;
+                HashSet<string>? reportedUnsupportedProperties = null;
 
                 INamedTypeSymbol? current = typeSymbol;
                 while (current is not null)
@@ -658,23 +719,43 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                     ImmutableArray<ISymbol> members = current.GetMembers();
                     foreach (ISymbol member in members)
                     {
-                        if (member is IPropertySymbol { IsIndexer: false, IsImplicitlyDeclared: false } property && !IsUnsupportedType(property.Type))
+                        if (member is IPropertySymbol { IsIndexer: false, IsImplicitlyDeclared: false } property)
                         {
                             string propertyName = property.Name;
+                            bool isDuplicateOrOverride = property.IsOverride || properties?.ContainsKey(propertyName) is true;
 
-                            if (property.IsOverride || properties?.ContainsKey(propertyName) is true)
+                            if (IsUnsupportedType(property.Type))
+                            {
+                                // Report the skip once per property name. The override/duplicate check covers an
+                                // error-typed property that is overridden or shadows an already-bound member, while
+                                // the name set covers a `new`-shadowed error-typed property: both the base and
+                                // derived copies are skipped (so neither lands in 'properties' to dedupe the other),
+                                // which would otherwise fire SYSLIB1101 twice for the same name.
+                                if (ContainsErrorType(property.Type) && !isDuplicateOrOverride &&
+                                    (reportedUnsupportedProperties ??= new(StringComparer.OrdinalIgnoreCase)).Add(propertyName))
+                                {
+                                    RecordDiagnostic(DiagnosticDescriptors.PropertyNotSupported, typeParseInfo.BinderInvocation?.Location, [propertyName, typeParseInfo.FullName]);
+                                }
+
+                                continue;
+                            }
+
+                            if (isDuplicateOrOverride)
                             {
                                 continue;
                             }
 
                             TypeRef propertyTypeRef = EnqueueTransitiveType(typeParseInfo, property.Type, DiagnosticDescriptors.PropertyNotSupported, propertyName);
+                            ImmutableArray<AttributeData> attributes = property.GetAttributes();
 
-                            AttributeData? attributeData = property.GetAttributes().FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _typeSymbols.ConfigurationKeyNameAttribute));
+                            AttributeData? attributeData = attributes.FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _typeSymbols.ConfigurationKeyNameAttribute));
                             string configKeyName = attributeData?.ConstructorArguments.FirstOrDefault().Value as string ?? propertyName;
+                            bool isIgnored = attributes.Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _typeSymbols.ConfigurationIgnoreAttribute));
 
                             PropertySpec spec = new(property, propertyTypeRef)
                             {
-                                ConfigurationKeyName = configKeyName
+                                ConfigurationKeyName = configKeyName,
+                                IsIgnored = isIgnored,
                             };
 
                             (properties ??= new(StringComparer.OrdinalIgnoreCase))[propertyName] = spec;
@@ -695,7 +776,7 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                     {
                         string parameterName = parameter.Name;
 
-                        if (properties?.TryGetValue(parameterName, out PropertySpec? propertySpec) is not true)
+                        if (properties?.TryGetValue(parameterName, out PropertySpec? propertySpec) is not true || propertySpec.IsIgnored)
                         {
                             (missingParameters ??= new()).Add(parameterName);
                         }
@@ -827,6 +908,44 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 return SymbolEqualityComparer.Default.Equals(type, @interface);
             }
 
+            // A member type is unsupported when it, a nested array element, a generic type argument, or an
+            // enclosing (containing) type is an error symbol — i.e. an unresolved or ambiguous metadata type
+            // from a reference that isn't available to the current compilation. Emitting binding code that names
+            // such a type produces uncompilable output (missing/ambiguous type errors), so callers skip these
+            // members instead.
+            private static bool ContainsErrorType(ITypeSymbol type)
+            {
+                if (type.TypeKind is TypeKind.Error)
+                {
+                    return true;
+                }
+
+                if (type is IArrayTypeSymbol arrayType)
+                {
+                    return ContainsErrorType(arrayType.ElementType);
+                }
+
+                if (type is INamedTypeSymbol { IsGenericType: true } genericType)
+                {
+                    foreach (ITypeSymbol typeArgument in genericType.TypeArguments)
+                    {
+                        if (ContainsErrorType(typeArgument))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                // A nested type (e.g. Outer<Missing>.Inner) carries the error symbol on its containing type rather
+                // than in its own type arguments, so inspect the enclosing type as well.
+                if (type.ContainingType is not null && ContainsErrorType(type.ContainingType))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
             private static bool ContainsGenericParameters(ITypeSymbol type)
             {
                 if (type is not INamedTypeSymbol { IsGenericType: true } genericType)
@@ -924,10 +1043,10 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                 }
             }
 
-            private void RecordDiagnostic(DiagnosticDescriptor descriptor, Location trimmedLocation, params object?[]? messageArgs)
+            private void RecordDiagnostic(DiagnosticDescriptor descriptor, Location location, params object?[]? messageArgs)
             {
-                Diagnostics ??= new List<DiagnosticInfo>();
-                Diagnostics.Add(DiagnosticInfo.Create(descriptor, trimmedLocation, messageArgs));
+                Diagnostics ??= new List<Diagnostic>();
+                Diagnostics.Add(Diagnostic.Create(descriptor, location, messageArgs));
             }
 
             private void CheckIfToEmitParseEnumMethod()

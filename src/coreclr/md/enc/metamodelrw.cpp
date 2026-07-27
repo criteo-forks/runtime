@@ -19,6 +19,7 @@
 #include "../compiler/importhelper.h"
 #include "metadata.h"
 #include "streamutil.h"
+#include <minipal/guid.h>
 
 #ifdef _MSC_VER
 #pragma intrinsic(memcpy)
@@ -597,7 +598,7 @@ protected:
             return S_OK;
         }
 
-        PREFAST_ASSUME_MSG(m_iElemSize <= (int) sizeof(m_buf), "The MetaData table row has to fit into buffer for swapping.");
+        _ASSERTE((m_iElemSize <= (int) sizeof(m_buf)) && "The MetaData table row has to fit into buffer for swapping.");
 
         IfFailRet(getRow(iFirst, &pFirst));
         IfFailRet(getRow(iSecond, &pSecond));
@@ -710,6 +711,7 @@ CMiniMdRW::CMiniMdRW()
     m_pHostFilter(0),
     m_pTokenRemapManager(0),
     m_fMinimalDelta(FALSE),
+    m_fAll4ByteColumns(FALSE),
     m_rENCRecs(0)
 {
 #ifdef _DEBUG
@@ -1039,7 +1041,7 @@ CMiniMdRW::CalculateTypeRefToTypeDefMap()
     mdToken     td;
     mdToken     tkResScope;
 
-    PREFIX_ASSUME(GetTypeRefToTypeDefMap() != NULL);
+    _ASSERTE(GetTypeRefToTypeDefMap() != NULL);
 
     for (index = 1; index <= m_Schema.m_cRecs[TBL_TypeRef]; index++)
     {
@@ -1196,7 +1198,7 @@ CMiniMdRW::SetOption(
         PutCol(TBL_Module, ModuleRec::COL_EncBaseId, pMod, uVal);
 */
         // Allocate a new GUID for EncId.
-        IfFailGo(CoCreateGuid(&encid));
+    IfFailGo(minipal_guid_v4_create(&encid) ? S_OK : E_FAIL);
         IfFailGo(PutGuid(TBL_Module, ModuleRec::COL_EncId, pMod, encid));
 #else //!FEATURE_METADATA_EMIT
         IfFailGo(E_INVALIDARG);
@@ -1275,6 +1277,7 @@ CMiniMdRW::ComputeGrowLimits(
         m_limIx = USHRT_MAX << 1;
         m_limRid = USHRT_MAX << 1;
         m_eGrow = eg_grown;
+        m_fAll4ByteColumns = TRUE;
     }
 } // CMiniMdRW::ComputeGrowLimits
 
@@ -2388,10 +2391,6 @@ bool CMiniMdRW::CanHaveCustomAttribute( // Can a given table have a custom attri
 } // CMiniMdRW::CanHaveCustomAttribute
 #endif //_DEBUG
 
-#ifdef _PREFAST_
-#pragma warning(push)
-#pragma warning(disable:21000) // Suppress PREFast warning about overly large function
-#endif
 //---------------------------------------------------------------------------------------
 //
 // Perform any available pre-save optimizations.
@@ -2865,7 +2864,7 @@ CMiniMdRW::PreSaveFull()
     if (m_pHandler != NULL)
     {
         TOKENMAP * ptkmap = GetMemberRefToMemberDefMap();
-        PREFIX_ASSUME(ptkmap != NULL);  // RegMeta always inits this.
+        _ASSERTE(ptkmap != NULL);  // RegMeta always inits this.
         MDTOKENMAP * ptkRemap = GetTokenMovementMap();
         int     iCount = m_Schema.m_cRecs[TBL_MemberRef];
         mdToken tkTo;
@@ -2915,10 +2914,6 @@ ErrExit:
 
     return hr;
 } // CMiniMdRW::PreSaveFull
-
-#ifdef _PREFAST_
-#pragma warning(pop)
-#endif
 
 //---------------------------------------------------------------------------------------
 //
@@ -3563,6 +3558,7 @@ CMiniMdRW::ExpandTables()
 
     // Remember that we've grown.
     m_eGrow = eg_grown;
+    m_fAll4ByteColumns = TRUE;
     m_maxRid = m_maxIx = UINT32_MAX;
 
 ErrExit:
@@ -4910,6 +4906,14 @@ CMiniMdRW::AddPropertyToPropertyMap(
         IfFailGo(AddChildRowIndirectForParent(TBL_PropertyMap, PropertyMapRec::COL_PropertyList,
                                         TBL_PropertyPtr, pmd, &pPtr));
         hr = PutCol(TBL_PropertyPtr, PropertyPtrRec::COL_Property, pPtr, pd);
+
+        // Add the <property, typedef> to the property parent lookup table.
+        // This mirrors what AddMethodToTypeDef/AddFieldToTypeDef do for their
+        // respective lookup tables, and what emit.cpp:DefineProperty does.
+        PropertyMapRec *pPropertyMapRec;
+        IfFailGo(GetPropertyMapRecord(pmd, &pPropertyMapRec));
+        IfFailGo(AddPropertyToLookUpTable(TokenFromRid(pd, mdtProperty),
+                                          getParentOfPropertyMap(pPropertyMapRec)));
     }
 
 
@@ -4937,6 +4941,14 @@ CMiniMdRW::AddEventToEventMap(
         IfFailGo(AddChildRowIndirectForParent(TBL_EventMap, EventMapRec::COL_EventList,
                                         TBL_EventPtr, emd, &pPtr));
         hr = PutCol(TBL_EventPtr, EventPtrRec::COL_Event, pPtr, ed);
+
+        // Add the <event, typedef> to the event parent lookup table.
+        // This mirrors what AddMethodToTypeDef/AddFieldToTypeDef do for their
+        // respective lookup tables.
+        EventMapRec *pEventMapRec;
+        IfFailGo(GetEventMapRecord(emd, &pEventMapRec));
+        IfFailGo(AddEventToLookUpTable(TokenFromRid(ed, mdtEvent),
+                                       getParentOfEventMap(pEventMapRec)));
     }
 ErrExit:
     return hr;
@@ -6697,7 +6709,7 @@ CMiniMdRW::FindParentOfMethodHelper(
                 for (indexMd = ridStart; indexMd < ridEnd; indexMd++)
                 {
                     IfFailGo(GetMethodPtrRecord(indexMd, &pMethodPtrRec));
-                    PREFIX_ASSUME(pMethodMap->Get(getMethodOfMethodPtr(pMethodPtrRec)) != NULL);
+                    _ASSERTE(pMethodMap->Get(getMethodOfMethodPtr(pMethodPtrRec)) != NULL);
                     *(pMethodMap->Get(getMethodOfMethodPtr(pMethodPtrRec))) = indexTd;
                 }
             }
@@ -6760,7 +6772,7 @@ CMiniMdRW::FindParentOfFieldHelper(
                 for (indexFd = ridStart; indexFd < ridEnd; indexFd++)
                 {
                     IfFailGo(GetFieldPtrRecord(indexFd, &pFieldPtrRec));
-                    PREFIX_ASSUME(pFieldMap->Get(getFieldOfFieldPtr(pFieldPtrRec)) != NULL);
+                    _ASSERTE(pFieldMap->Get(getFieldOfFieldPtr(pFieldPtrRec)) != NULL);
                     *(pFieldMap->Get(getFieldOfFieldPtr(pFieldPtrRec))) = indexTd;
                 }
             }
@@ -6824,7 +6836,7 @@ CMiniMdRW::FindParentOfPropertyHelper(
                 {
                     IfFailGo(GetPropertyPtrRecord(indexPr, &pPropertyPtrRec));
                     mdToken *tok =  pPropertyMap->Get(getPropertyOfPropertyPtr(pPropertyPtrRec));
-                    PREFIX_ASSUME(tok != NULL);
+                    _ASSERTE(tok != NULL);
                     *tok = getParentOfPropertyMap(pPropertyMapRec);
                 }
             }
@@ -6893,7 +6905,7 @@ CMiniMdRW::FindParentOfEventHelper(
                 {
                     IfFailGo(GetEventPtrRecord(indexEv, &pEventPtrRec));
                     mdToken* tok = pEventMap->Get(getEventOfEventPtr(pEventPtrRec));
-                    PREFIX_ASSUME(tok != NULL);
+                    _ASSERTE(tok != NULL);
                     *tok = getParentOfEventMap(pEventMapRec);
                 }
             }
@@ -6961,7 +6973,7 @@ CMiniMdRW::FindParentOfParamHelper(
                 for (indexPd = ridStart; indexPd < ridEnd; indexPd++)
                 {
                     IfFailGo(GetParamPtrRecord(indexPd, &pParamPtrRec));
-                    PREFIX_ASSUME(pParamMap->Get(getParamOfParamPtr(pParamPtrRec)) != NULL);
+                    _ASSERTE(pParamMap->Get(getParamOfParamPtr(pParamPtrRec)) != NULL);
                     *(pParamMap->Get(getParamOfParamPtr(pParamPtrRec))) = indexMd;
                 }
             }

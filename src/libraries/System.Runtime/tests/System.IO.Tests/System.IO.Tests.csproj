@@ -5,6 +5,12 @@
     <TestRuntime>true</TestRuntime>
     <IncludeRemoteExecutor>true</IncludeRemoteExecutor>
     <TargetFramework>$(NetCoreAppCurrent)</TargetFramework>
+    <XunitShowProgress>true</XunitShowProgress>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetOS)' == 'browser' and '$(WasmEnableThreads)' == 'true'">
+    <WasmXHarnessMaxParallelThreads>1</WasmXHarnessMaxParallelThreads>
+    <!-- VSF is emulated on the UI thread and all calls are slow because they are marshaled -->
+    <WasmXHarnessTestsTimeout>01:15:00</WasmXHarnessTestsTimeout>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="IndentedTextWriter.cs" />
@@ -27,6 +33,14 @@
     <Compile Include="MemoryStream\MemoryStream.ConstructorTests.cs" />
     <Compile Include="MemoryStream\MemoryStream.TryGetBufferTests.cs" />
     <Compile Include="MemoryStream\MemoryStreamTests.cs" />
+    <Compile Include="WritableMemoryStream\WritableMemoryStreamConformanceTests.cs" />
+    <Compile Include="WritableMemoryStream\WritableMemoryStreamTests.cs" />
+    <Compile Include="ReadOnlyMemoryStream\ReadOnlyMemoryStreamConformanceTests.cs" />
+    <Compile Include="ReadOnlyMemoryStream\ReadOnlyMemoryStreamTests.cs" />
+    <Compile Include="StringStream\StringStreamConformanceTests.cs" />
+    <Compile Include="StringStream\StringStreamTestBase.cs" />
+    <Compile Include="StringStream\StringStreamTests_Memory.cs" />
+    <Compile Include="StringStream\StringStreamTests_String.cs" />
     <Compile Include="StreamReader\StreamReader.CtorTests.cs" />
     <Compile Include="StreamReader\StreamReaderTests.cs" />
     <Compile Include="StreamReader\StreamReaderTests_Serial.cs" />

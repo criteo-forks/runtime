@@ -17,13 +17,7 @@
 #include "xclrdata.h"
 #include "posterror.h"
 #include <type_traits>
-
-// Hot cache lines need to be aligned to cache line size to improve performance
-#if defined(TARGET_ARM64)
-#define MAX_CACHE_LINE_SIZE 128
-#else
-#define MAX_CACHE_LINE_SIZE 64
-#endif
+#include "minipal/time.h"
 
 #ifndef DACCESS_COMPILE
 #if defined(TARGET_WINDOWS) && defined(TARGET_ARM64)
@@ -37,11 +31,6 @@ extern bool g_arm64_atomics_present;
 // Copied from malloc.h: don't want to bring in the whole header file.
 void * __cdecl _alloca(size_t);
 #endif // !TARGET_UNIX
-
-#ifdef _PREFAST_
-// Suppress prefast warning #6255: alloca indicates failure by raising a stack overflow exception
-#pragma warning(disable:6255)
-#endif // _PREFAST_
 
 BOOL inline FitsInI1(int64_t val)
 {
@@ -79,66 +68,6 @@ BOOL inline FitsInU4(uint64_t val)
     return val == (uint64_t)(uint32_t)val;
 }
 
-#if defined(DACCESS_COMPILE)
-#define FastInterlockedCompareExchange InterlockedCompareExchange
-#define FastInterlockedCompareExchangeAcquire InterlockedCompareExchangeAcquire
-#define FastInterlockedCompareExchangeRelease InterlockedCompareExchangeRelease
-#else
-
-#if defined(TARGET_WINDOWS) && defined(TARGET_ARM64)
-
-FORCEINLINE LONG  FastInterlockedCompareExchange(
-    LONG volatile *Destination,
-    LONG Exchange,
-    LONG Comperand)
-{
-    if (g_arm64_atomics_present)
-    {
-        return (LONG) __casal32((unsigned __int32*) Destination, (unsigned  __int32)Comperand, (unsigned __int32)Exchange);
-    }
-    else
-    {
-        return InterlockedCompareExchange(Destination, Exchange, Comperand);
-    }
-}
-
-FORCEINLINE LONG FastInterlockedCompareExchangeAcquire(
-  IN OUT LONG volatile *Destination,
-  IN LONG Exchange,
-  IN LONG Comperand
-)
-{
-    if (g_arm64_atomics_present)
-    {
-        return (LONG) __casa32((unsigned __int32*) Destination, (unsigned  __int32)Comperand, (unsigned __int32)Exchange);
-    }
-    else
-    {
-        return InterlockedCompareExchangeAcquire(Destination, Exchange, Comperand);
-    }
-}
-
-FORCEINLINE LONG FastInterlockedCompareExchangeRelease(
-  IN OUT LONG volatile *Destination,
-  IN LONG Exchange,
-  IN LONG Comperand
-)
-{
-    if (g_arm64_atomics_present)
-    {
-        return (LONG) __casl32((unsigned __int32*) Destination, (unsigned  __int32)Comperand, (unsigned __int32)Exchange);
-    }
-    else
-    {
-        return InterlockedCompareExchangeRelease(Destination, Exchange, Comperand);
-    }
-}
-
-#endif // defined(TARGET_WINDOWS) && defined(TARGET_ARM64)
-
-#endif //defined(DACCESS_COMPILE)
-
-
 //************************************************************************
 // CQuickHeap
 //
@@ -146,7 +75,7 @@ FORCEINLINE LONG FastInterlockedCompareExchangeRelease(
 // Destroying the heap frees all blocks allocated from the heap.
 // Blocks cannot be freed individually.
 //
-// The heap uses COM+ exceptions to report errors.
+// The heap uses exceptions to report errors.
 //
 // The heap does not use any internal synchronization so it is not
 // multithreadsafe.
@@ -438,11 +367,11 @@ extern LockOwner g_lockTrustMeIAmThreadSafe;
 class EEThreadId
 {
 private:
-    void *m_FiberPtrId;
+    static SIZE_T const UNKNOWN_ID = INVALID_POINTER_CD;
+    SIZE_T m_FiberPtrId;
 public:
 #ifdef _DEBUG
-    EEThreadId()
-    : m_FiberPtrId(NULL)
+    EEThreadId() : m_FiberPtrId(UNKNOWN_ID)
     {
         LIMITED_METHOD_CONTRACT;
     }
@@ -452,28 +381,27 @@ public:
     {
         WRAPPER_NO_CONTRACT;
 
-        m_FiberPtrId = ClrTeb::GetFiberPtrId();
+        m_FiberPtrId = (SIZE_T)ClrTeb::GetFiberPtrId();
     }
 
     bool IsCurrentThread() const
     {
         WRAPPER_NO_CONTRACT;
 
-        return (m_FiberPtrId == ClrTeb::GetFiberPtrId());
+        return (m_FiberPtrId == (SIZE_T)ClrTeb::GetFiberPtrId());
     }
-
 
 #ifdef _DEBUG
     bool IsUnknown() const
     {
         LIMITED_METHOD_CONTRACT;
-        return m_FiberPtrId == NULL;
+        return m_FiberPtrId == UNKNOWN_ID;
     }
 #endif
     void Clear()
     {
         LIMITED_METHOD_CONTRACT;
-        m_FiberPtrId = NULL;
+        m_FiberPtrId = UNKNOWN_ID;
     }
 };
 
@@ -499,20 +427,36 @@ CLRUnmapViewOfFile(
     IN LPVOID lpBaseAddress
     );
 
+struct CLRMapViewTraits final
+{
+    using Type = void*;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type ptr)
+    {
+        STATIC_CONTRACT_WRAPPER;
 #ifndef DACCESS_COMPILE
-FORCEINLINE void VoidCLRUnmapViewOfFile(void *ptr) { CLRUnmapViewOfFile(ptr); }
-typedef Wrapper<void *, DoNothing, VoidCLRUnmapViewOfFile> CLRMapViewHolder;
-#else
-typedef Wrapper<void *, DoNothing, DoNothing> CLRMapViewHolder;
+        if (ptr != NULL)
+            CLRUnmapViewOfFile(ptr);
 #endif
+    }
+};
+using CLRMapViewHolder = LifetimeHolder<CLRMapViewTraits>;
 
 #ifdef TARGET_UNIX
+struct PALPEFileTraits final
+{
+    using Type = void*;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type ptr)
+    {
+        STATIC_CONTRACT_WRAPPER;
 #ifndef DACCESS_COMPILE
-FORCEINLINE void VoidPALUnloadPEFile(void *ptr) { PAL_LOADUnloadPEFile(ptr); }
-typedef Wrapper<void *, DoNothing, VoidPALUnloadPEFile> PALPEFileHolder;
-#else
-typedef Wrapper<void *, DoNothing, DoNothing> PALPEFileHolder;
+        if (ptr != NULL)
+            PAL_LOADUnloadPEFile(ptr);
 #endif
+    }
+};
+using PALPEFileHolder = LifetimeHolder<PALPEFileTraits>;
 #endif // TARGET_UNIX
 
 #define SetupThreadForComCall(OOMRetVal)            \
@@ -528,21 +472,26 @@ typedef Wrapper<void *, DoNothing, DoNothing> PALPEFileHolder;
 #define SetupForComCallDWORD() SetupThreadForComCall(ERROR_OUTOFMEMORY)
 
 // A holder for NATIVE_LIBRARY_HANDLE.
-FORCEINLINE void VoidFreeNativeLibrary(NATIVE_LIBRARY_HANDLE h)
+struct NativeLibraryHandleTraits final
 {
-    WRAPPER_NO_CONTRACT;
+    using Type = NATIVE_LIBRARY_HANDLE;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type h)
+    {
+        STATIC_CONTRACT_WRAPPER;
 
-    if (h == NULL)
-        return;
+        if (h == NULL)
+            return;
 
 #ifdef HOST_UNIX
-    PAL_FreeLibraryDirect(h);
+        PAL_FreeLibraryDirect(h);
 #else
-    FreeLibrary(h);
+        FreeLibrary(h);
 #endif
-}
+    }
+};
 
-typedef Wrapper<NATIVE_LIBRARY_HANDLE, DoNothing<NATIVE_LIBRARY_HANDLE>, VoidFreeNativeLibrary, 0> NativeLibraryHandleHolder;
+using NativeLibraryHandleHolder = LifetimeHolder<NativeLibraryHandleTraits>;
 
 extern thread_local size_t t_CantStopCount;
 
@@ -578,6 +527,11 @@ inline bool IsInCantStopRegion()
 
 BOOL IsValidMethodCodeNotification(ULONG32 Notification);
 
+// Number of usable JIT notification entries. The allocated table has
+// JIT_NOTIFICATION_TABLE_SIZE + 1 slots; slot 0 stores bookkeeping (length).
+// Referenced by the cDAC via CDAC_GLOBAL(JITNotificationTableSize, ...).
+constexpr UINT JIT_NOTIFICATION_TABLE_SIZE = 1000;
+
 typedef DPTR(struct JITNotification) PTR_JITNotification;
 struct JITNotification
 {
@@ -610,7 +564,7 @@ GVAL_DECL(ULONG32, g_dacNotificationFlags);
 inline void
 InitializeJITNotificationTable()
 {
-    g_pNotificationTable = new (nothrow) JITNotification[1001];
+    g_pNotificationTable = new (nothrow) JITNotification[JIT_NOTIFICATION_TABLE_SIZE + 1];
 }
 
 #endif // TARGET_UNIX && !DACCESS_COMPILE
@@ -643,106 +597,10 @@ private:
     JITNotification *m_jitTable;
 };
 
-typedef DPTR(struct GcNotification) PTR_GcNotification;
-
-inline
-BOOL IsValidGcNotification(GcEvt_t evType)
-{ return (evType < GC_EVENT_TYPE_MAX); }
-
-#define CLRDATA_GC_NONE  0
-
-struct GcNotification
+namespace GcNotifications
 {
-    GcEvtArgs ev;
-
-    GcNotification() { SetFree(); }
-    BOOL IsFree() { return ev.typ == CLRDATA_GC_NONE; }
-    void SetFree() { memset(this, 0, sizeof(*this)); ev.typ = (GcEvt_t) CLRDATA_GC_NONE; }
-    void Set(GcEvtArgs ev_)
-    {
-        _ASSERTE(IsValidGcNotification(ev_.typ));
-        ev = ev_;
-    }
-    BOOL IsMatch(GcEvtArgs ev_)
-    {
-        LIMITED_METHOD_CONTRACT;
-        if (ev.typ != ev_.typ)
-        {
-            return FALSE;
-        }
-        switch (ev.typ)
-        {
-        case GC_MARK_END:
-            if (ev_.condemnedGeneration == 0 ||
-                (ev.condemnedGeneration & ev_.condemnedGeneration) != 0)
-            {
-                return TRUE;
-            }
-            break;
-        default:
-            break;
-        }
-
-        return FALSE;
-    }
-};
-
-GPTR_DECL(GcNotification, g_pGcNotificationTable);
-
-class GcNotifications
-{
-public:
-    GcNotifications(GcNotification *gcTable);
-    BOOL SetNotification(GcEvtArgs ev);
-    GcEvtArgs* GetNotification(GcEvtArgs ev)
-    {
-        LIMITED_METHOD_CONTRACT;
-        UINT idx;
-        if (FindItem(ev, &idx))
-        {
-            return &m_gcTable[idx].ev;
-        }
-        else
-        {
-            return NULL;
-        }
-    }
-
-    // if clrModule is NULL, all active notifications are changed to NType
-    inline BOOL IsActive()
-    { return m_gcTable != NULL; }
-
-    UINT GetTableSize()
-    { return Size(); }
-
-#ifdef DACCESS_COMPILE
-    static GcNotification *InitializeNotificationTable(UINT TableSize);
-    // Updates target table from host copy
-    BOOL UpdateOutOfProcTable();
-#endif
-
-private:
-    UINT& Length()
-    {
-        LIMITED_METHOD_CONTRACT;
-        _ASSERTE(IsActive());
-        UINT *pLen = (UINT *) &(m_gcTable[-1].ev.typ);
-        return *pLen;
-    }
-    UINT& Size()
-    {
-        _ASSERTE(IsActive());
-        UINT *pLen = (UINT *) &(m_gcTable[-1].ev.typ);
-        return *(pLen+1);
-    }
-    void IncrementLength()
-    { ++Length(); }
-    void DecrementLength()
-    { --Length(); }
-
-    BOOL FindItem(GcEvtArgs ev, UINT *indexOut);
-
-    GcNotification *m_gcTable;
+    VOID SetNotification(GcEvtArgs ev);
+    BOOL GetNotification(GcEvtArgs ev);
 };
 
 
@@ -758,7 +616,7 @@ public:
         MODULE_LOAD_NOTIFICATION=1,
         MODULE_UNLOAD_NOTIFICATION=2,
         JIT_NOTIFICATION=3,
-        JIT_PITCHING_NOTIFICATION=4,
+        __UNUSED__=4,
         EXCEPTION_NOTIFICATION=5,
         GC_NOTIFICATION= 6,
         CATCH_ENTER_NOTIFICATION = 7,
@@ -767,7 +625,6 @@ public:
 
     // called from the runtime
     static void DoJITNotification(MethodDesc *MethodDescPtr, TADDR NativeCodeLocation);
-    static void DoJITPitchingNotification(MethodDesc *MethodDescPtr);
     static void DoModuleLoadNotification(Module *Module);
     static void DoModuleUnloadNotification(Module *Module);
     static void DoExceptionNotification(class Thread* ThreadPtr);
@@ -777,7 +634,6 @@ public:
     // called from the DAC
     static int GetType(TADDR Args[]);
     static BOOL ParseJITNotification(TADDR Args[], TADDR& MethodDescPtr, TADDR& NativeCodeLocation);
-    static BOOL ParseJITPitchingNotification(TADDR Args[], TADDR& MethodDescPtr);
     static BOOL ParseModuleLoadNotification(TADDR Args[], TADDR& ModulePtr);
     static BOOL ParseModuleUnloadNotification(TADDR Args[], TADDR& ModulePtr);
     static BOOL ParseExceptionNotification(TADDR Args[], TADDR& ThreadPtr);
@@ -800,17 +656,6 @@ BOOL DbgIsExecutable(LPVOID lpMem, SIZE_T length);
 
 int GetRandomInt(int maxVal);
 
-//
-//
-// COMCHARACTER
-//
-//
-class COMCharacter {
-public:
-    //These are here for support from native code.  They are never called from our managed classes.
-    static BOOL nativeIsWhiteSpace(WCHAR c);
-};
-
 // ======================================================================================
 // Simple, reusable 100ns timer for normalizing ticks. For use in Q/FCalls to avoid discrepency with
 // tick frequency between native and managed.
@@ -820,8 +665,8 @@ private:
     static const int64_t NormalizedTicksPerSecond = 10000000 /* 100ns ticks per second (1e7) */;
     static Volatile<double> s_frequency;
 
-    LARGE_INTEGER startTimestamp;
-    LARGE_INTEGER stopTimestamp;
+    int64_t startTimestamp;
+    int64_t stopTimestamp;
 
 #if _DEBUG
     bool isRunning = false;
@@ -834,15 +679,14 @@ public:
         if (s_frequency.Load() == -1)
         {
             double frequency;
-            LARGE_INTEGER qpfValue;
-            QueryPerformanceFrequency(&qpfValue);
-            frequency = static_cast<double>(qpfValue.QuadPart);
+            int64_t qpfValue = minipal_hires_tick_frequency();
+            frequency = static_cast<double>(qpfValue);
             frequency /= NormalizedTicksPerSecond;
             s_frequency.Store(frequency);
         }
 
-        startTimestamp.QuadPart = 0;
-        startTimestamp.QuadPart = 0;
+        startTimestamp = 0;
+        stopTimestamp = 0;
     }
 
     // ======================================================================================
@@ -852,7 +696,7 @@ public:
     {
         LIMITED_METHOD_CONTRACT;
         _ASSERTE(!isRunning);
-        QueryPerformanceCounter(&startTimestamp);
+        startTimestamp = minipal_hires_ticks();
 
 #if _DEBUG
         isRunning = true;
@@ -866,7 +710,7 @@ public:
     {
         LIMITED_METHOD_CONTRACT;
         _ASSERTE(isRunning);
-        QueryPerformanceCounter(&stopTimestamp);
+        stopTimestamp = minipal_hires_ticks();
 
 #if _DEBUG
         isRunning = false;
@@ -882,9 +726,9 @@ public:
     {
         LIMITED_METHOD_CONTRACT;
         _ASSERTE(!isRunning);
-        _ASSERTE(startTimestamp.QuadPart > 0);
-        _ASSERTE(stopTimestamp.QuadPart > 0);
-        return static_cast<int64_t>((stopTimestamp.QuadPart - startTimestamp.QuadPart) / s_frequency);
+        _ASSERTE(startTimestamp > 0);
+        _ASSERTE(stopTimestamp > 0);
+        return static_cast<int64_t>((stopTimestamp - startTimestamp) / s_frequency);
     }
 };
 

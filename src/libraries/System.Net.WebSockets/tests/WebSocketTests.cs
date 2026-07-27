@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -182,6 +183,37 @@ namespace System.Net.WebSockets.Tests
         }
 
         [Fact]
+        public async Task SendAsync_FlushAsyncSyncFaulted_WrapsExceptionInWebSocketException()
+        {
+            var underlying = new IOException("flush failed");
+            using var stream = new WebSocketTestStream { FlushException = underlying };
+            using WebSocket ws = WebSocket.CreateFromStream(
+                stream, isServer: false, subProtocol: null, keepAliveInterval: Timeout.InfiniteTimeSpan);
+
+            var buffer = new ArraySegment<byte>(new byte[] { 1, 2, 3 });
+
+            WebSocketException ex = await Assert.ThrowsAsync<WebSocketException>(
+                () => ws.SendAsync(buffer, WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None));
+
+            Assert.Equal(WebSocketError.ConnectionClosedPrematurely, ex.WebSocketErrorCode);
+            Assert.Same(underlying, ex.InnerException);
+        }
+
+        [Fact]
+        public async Task ReceiveAsync_ServerUnmaskedFrame_ThrowsWebSocketException()
+        {
+            byte[] frame = { 0x81, 0x05, 0x48, 0x65, 0x6C, 0x6C, 0x6F };
+            using var stream = new MemoryStream();
+            stream.Write(frame, 0, frame.Length);
+            stream.Position = 0;
+            using WebSocket websocket = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true });
+            WebSocketException exception = await Assert.ThrowsAsync<WebSocketException>(() =>
+                websocket.ReceiveAsync(new byte[5], CancellationToken.None));
+            Assert.Equal(SR.net_Websockets_ServerReceivedUnmaskedFrame, exception.Message);
+            Assert.Equal(WebSocketState.Aborted, websocket.State);
+        }
+
+        [Fact]
         public async Task ReceiveAsync_WhenDisposedInParallel_DoesNotGetStuck()
         {
             using var stream = new WebSocketTestStream();
@@ -198,6 +230,26 @@ namespace System.Net.WebSockets.Tests
             await Assert.ThrowsAsync<WebSocketException>(() => r1.WaitAsync(TimeSpan.FromSeconds(1)));
             await Assert.ThrowsAsync<WebSocketException>(() => r2.WaitAsync(TimeSpan.FromSeconds(1)));
             await Assert.ThrowsAsync<WebSocketException>(() => r3.WaitAsync(TimeSpan.FromSeconds(1)));
+        }
+
+        [Fact]
+        public async Task ReceiveAsync_AfterCancellationDoReceiveAsync_ThrowsWebSocketException()
+        {
+            using var stream = new WebSocketTestStream();
+            using var websocket = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions());
+            var recvBuffer = new byte[100];
+            var segment = new ArraySegment<byte>(recvBuffer);
+            var cts = new CancellationTokenSource();
+
+            Task receive = websocket.ReceiveAsync(segment, cts.Token);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => receive);
+
+            WebSocketException ex = await Assert.ThrowsAsync<WebSocketException>(() =>
+                websocket.ReceiveAsync(segment, CancellationToken.None));
+            Assert.Equal(
+                SR.Format(SR.net_WebSockets_InvalidState, "Aborted", "Open, CloseSent"),
+                ex.Message);
         }
 
         public abstract class ExposeProtectedWebSocket : WebSocket

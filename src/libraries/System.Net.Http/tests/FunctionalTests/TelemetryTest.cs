@@ -22,7 +22,6 @@ namespace System.Net.Http.Functional.Tests
         public TelemetryTest(ITestOutputHelper output) : base(output) { }
 
         [Fact]
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/71877", typeof(PlatformDetection), nameof(PlatformDetection.IsBrowser), nameof(PlatformDetection.IsMonoAOT))]
         public void EventSource_ExistsWithCorrectId()
         {
             Type esType = typeof(HttpClient).Assembly.GetType("System.Net.Http.HttpTelemetry", throwOnError: true, ignoreCase: false);
@@ -51,7 +50,6 @@ namespace System.Net.Http.Functional.Tests
 
         public static IEnumerable<object[]> Redaction_MemberData()
         {
-            string[] uriTails = new string[] { "/test/path?q1=a&q2=b", "/test/path", "?q1=a&q2=b", "" };
             foreach (string uriTail in new[] { "/test/path?q1=a&q2=b", "/test/path", "?q1=a&q2=b", "" })
             {
                 foreach (string fragment in new[] { "", "#frag" })
@@ -80,6 +78,8 @@ namespace System.Net.Http.Functional.Tests
                 Version version = Version.Parse(useVersionString);
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
+
+                await PrepareEventCountersAsync(listener);
 
                 bool buffersResponse = false;
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
@@ -222,6 +222,8 @@ namespace System.Net.Http.Functional.Tests
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
 
+                await PrepareEventCountersAsync(listener);
+
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
                 await listener.RunWithCallbackAsync(e => events.Enqueue((e, e.ActivityId)), async () =>
@@ -335,6 +337,8 @@ namespace System.Net.Http.Functional.Tests
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
 
+                await PrepareEventCountersAsync(listener);
+
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
                 await listener.RunWithCallbackAsync(e => events.Enqueue((e, e.ActivityId)), async () =>
@@ -435,6 +439,8 @@ namespace System.Net.Http.Functional.Tests
                 Version version = Version.Parse(useVersionString);
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
+
+                await PrepareEventCountersAsync(listener);
 
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
@@ -540,7 +546,7 @@ namespace System.Net.Http.Functional.Tests
             }
         }
 
-        // The validation assumes that the connection id's are in range 0..(connectionCount-1)
+        // The validation assumes that the connection id's are in range 1..connectionCount
         protected static void ValidateConnectionEstablishedClosed(ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)> events, Version version, Uri uri, int connectionCount = 1)
         {
             EventWrittenEventArgs[] connectionsEstablished = events.Select(e => e.Event).Where(e => e.EventName == "ConnectionEstablished").ToArray();
@@ -564,7 +570,7 @@ namespace System.Net.Http.Functional.Tests
                     ip.Equals(IPAddress.Loopback) ||
                     ip.Equals(IPAddress.IPv6Loopback));
             }
-            Assert.True(connectionIds.SetEquals(Enumerable.Range(0, connectionCount).Select(i => (long)i)), "ConnectionEstablished has logged an unexpected connectionId.");
+            Assert.True(connectionIds.SetEquals(Enumerable.Range(1, connectionCount).Select(i => (long)i)), "ConnectionEstablished has logged an unexpected connectionId.");
 
             EventWrittenEventArgs[] connectionsClosed = events.Select(e => e.Event).Where(e => e.EventName == "ConnectionClosed").ToArray();
             Assert.Equal(connectionCount, connectionsClosed.Length);
@@ -580,7 +586,7 @@ namespace System.Net.Http.Functional.Tests
             Assert.Empty(connectionIds);
         }
 
-        private static void ValidateRequestResponseStartStopEvents(ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)> events, int? requestContentLength, int? responseContentLength, int count, long connectionId = 0)
+        private static void ValidateRequestResponseStartStopEvents(ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)> events, int? requestContentLength, int? responseContentLength, int count)
         {
             (EventWrittenEventArgs Event, Guid ActivityId)[] requestHeadersStarts = events.Where(e => e.Event.EventName == "RequestHeadersStart").ToArray();
             Assert.Equal(count, requestHeadersStarts.Length);
@@ -589,7 +595,8 @@ namespace System.Net.Http.Functional.Tests
                 EventWrittenEventArgs e = r.Event;
                 Assert.Equal(1, e.Payload.Count);
                 Assert.Equal("connectionId", e.PayloadNames.Single());
-                Assert.Equal(connectionId, (long)e.Payload[0]);
+                // 1 instead of 0 to account for the request we made in PrepareEventCountersAsync.
+                Assert.Equal(1, (long)e.Payload[0]);
             });
 
             (EventWrittenEventArgs Event, Guid ActivityId)[] requestHeadersStops = events.Where(e => e.Event.EventName == "RequestHeadersStop").ToArray();
@@ -652,6 +659,9 @@ namespace System.Net.Http.Functional.Tests
 
         private static void ValidateEventCounters(ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)> events, int requestCount, bool shouldHaveFailures, int versionMajor, bool requestLeftQueue = false)
         {
+            // Account for the request we made in PrepareEventCountersAsync.
+            requestCount++;
+
             Dictionary<string, double[]> eventCounters = events
                 .Select(e => e.Event)
                 .Where(e => e.EventName == "EventCounters")
@@ -758,6 +768,8 @@ namespace System.Net.Http.Functional.Tests
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
 
+                await PrepareEventCountersAsync(listener);
+
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
                 await listener.RunWithCallbackAsync(e => events.Enqueue((e, e.ActivityId)), async () =>
@@ -840,7 +852,7 @@ namespace System.Net.Http.Functional.Tests
                 {
                     1 => (2, 2),
                     2 => (2, 3), // race condition: if a connection hits its stream limit, it will be removed from the list and re-added on a separate thread
-                    3 => (3, 3),
+                    3 => (2, 3),
                     _ => throw new ArgumentOutOfRangeException()
                 };
                 Assert.InRange(requestLeftQueueEvents.Count(), minCount, maxCount);
@@ -871,6 +883,9 @@ namespace System.Net.Http.Functional.Tests
                 Version version = Version.Parse(useVersionString);
 
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
+
+                await PrepareEventCountersAsync(listener);
+
                 listener.AddActivityTracking();
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
@@ -916,15 +931,16 @@ namespace System.Net.Http.Functional.Tests
         {
             var psi = new ProcessStartInfo();
             psi.Environment.Add("DOTNET_SYSTEM_NET_HTTP_DISABLEURIREDACTION", disableRedaction.ToString());
-            var fragIndex = uriTail.IndexOf('#');
-            var expectedUriTail = uriTail.Substring(0, fragIndex >= 0 ? fragIndex : uriTail.Length);
+
+            string expectedUriTail = uriTail;
             if (!disableRedaction)
             {
                 var queryIndex = expectedUriTail.IndexOf('?');
                 expectedUriTail = expectedUriTail.Substring(0, queryIndex >= 0 ? queryIndex + 1 : expectedUriTail.Length);
                 expectedUriTail = queryIndex >= 0 ? expectedUriTail + '*' : expectedUriTail;
+
+                expectedUriTail = expectedUriTail.Split('#')[0];
             }
-            expectedUriTail = fragIndex >= 0 ? expectedUriTail + uriTail.Substring(fragIndex) : expectedUriTail;
 
             await RemoteExecutor.Invoke(static async (useVersionString, uriTail, expectedUriTail) =>
             {
@@ -932,6 +948,9 @@ namespace System.Net.Http.Functional.Tests
 
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
+
+                await PrepareEventCountersAsync(listener);
+
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
 
@@ -972,20 +991,23 @@ namespace System.Net.Http.Functional.Tests
         public static bool SupportsRemoteExecutorAndAlpn = RemoteExecutor.IsSupported && PlatformDetection.SupportsAlpn;
 
         [OuterLoop]
-        [ConditionalTheory(nameof(SupportsRemoteExecutorAndAlpn))]
+        [ConditionalTheory(typeof(TelemetryTest), nameof(SupportsRemoteExecutorAndAlpn))]
         [InlineData(false)]
         [InlineData(true)]
-        public void EventSource_Proxy_LogsIPAddress(bool useSsl)
+        public async Task EventSource_Proxy_LogsIPAddress(bool useSsl)
         {
             if (UseVersion.Major == 3)
             {
                 return;
             }
 
-            RemoteExecutor.Invoke(static async (string useVersionString, string useSslString) =>
+            await RemoteExecutor.Invoke(static async (string useVersionString, string useSslString) =>
             {
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
+
+                await PrepareEventCountersAsync(listener);
+
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
 
                 await listener.RunWithCallbackAsync(e => events.Enqueue((e, e.ActivityId)), async () =>
@@ -1014,7 +1036,84 @@ namespace System.Net.Http.Functional.Tests
                         ip.Equals(IPAddress.Loopback) ||
                         ip.Equals(IPAddress.IPv6Loopback));
                 }
-            }, UseVersion.ToString(), useSsl.ToString()).Dispose();
+            }, UseVersion.ToString(), useSsl.ToString()).DisposeAsync();
+        }
+
+        [OuterLoop("Disposes the handler to force the connection closed.")]
+        [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
+        public async Task EventSource_ConnectTunnel_LogsBothTransportAndTunnelConnections()
+        {
+            if (UseVersion.Major == 3)
+            {
+                return; // HTTP/3 (QUIC) cannot be tunneled through an HTTP CONNECT proxy.
+            }
+
+            await RemoteExecutor.Invoke(static async (string useVersionString) =>
+            {
+                Version version = Version.Parse(useVersionString);
+                using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
+
+                var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
+                long stampedConnectionId = -1;
+                Version requestVersion = null;
+
+                await listener.RunWithCallbackAsync(e => events.Enqueue((e, e.ActivityId)), async () =>
+                {
+                    using LoopbackProxyServer proxyServer = LoopbackProxyServer.Create();
+
+                    await GetFactoryForVersion(version).CreateClientAndServerAsync(
+                        async uri =>
+                        {
+                            using HttpClientHandler handler = CreateHttpClientHandler(useVersionString);
+                            handler.Proxy = new WebProxy(proxyServer.Uri);
+                            using HttpClient client = CreateHttpClient(handler, useVersionString);
+
+                            using var request = new HttpRequestMessage(HttpMethod.Get, uri)
+                            {
+                                Version = version,
+                                VersionPolicy = HttpVersionPolicy.RequestVersionExact
+                            };
+                            (await client.SendAsync(request)).Dispose();
+
+                            Assert.NotNull(request.ConnectionId);
+                            stampedConnectionId = request.ConnectionId.Value;
+                            requestVersion = request.Version;
+                            // Disposing the handler (end of this scope) closes the tunnel connection, emitting
+                            // ConnectionClosed while the listener is still capturing.
+                        },
+                        server => server.HandleRequestAsync(),
+                        // HTTPS origin forces an HTTP/1 CONNECT tunnel through the proxy.
+                        options: new GenericLoopbackOptions() { UseSsl = true });
+                });
+
+                EventWrittenEventArgs[] established = events.Select(e => e.Event).Where(e => e.EventName == "ConnectionEstablished").ToArray();
+                EventWrittenEventArgs[] closed = events.Select(e => e.Event).Where(e => e.EventName == "ConnectionClosed").ToArray();
+
+                // A CONNECT tunnel uses two connection objects over one transport: the HTTP/1.1 connection to the proxy
+                // that carries the CONNECT (the tunnel) and the connection negotiated with the origin over it (the inner
+                // connection) that serves the request. Both report their lifecycle, so two ConnectionEstablished and two
+                // ConnectionClosed events are logged, with distinct ids.
+                Assert.Equal(2, established.Length);
+                Assert.Equal(2, closed.Length);
+
+                long[] establishedIds = established.Select(e => (long)e.Payload[2]).ToArray();
+                Assert.Equal(2, establishedIds.Distinct().Count());
+                Assert.Equal(establishedIds.OrderBy(id => id).ToArray(), closed.Select(e => (long)e.Payload[2]).OrderBy(id => id).ToArray());
+
+                // The inner connection served the request: it carries the id stamped on the request, at the negotiated
+                // end-to-end version (e.g. HTTP/2).
+                EventWrittenEventArgs innerEstablished = Assert.Single(established, e => (long)e.Payload[2] == stampedConnectionId);
+                Assert.Equal((byte)requestVersion.Major, (byte)innerEstablished.Payload[0]); // versionMajor
+                Assert.Equal((byte)requestVersion.Minor, (byte)innerEstablished.Payload[1]); // versionMinor
+
+                // The other is the tunnel's transport connection to the proxy, always logged as HTTP/1.1.
+                EventWrittenEventArgs tunnelEstablished = Assert.Single(established, e => (long)e.Payload[2] != stampedConnectionId);
+                Assert.Equal((byte)1, (byte)tunnelEstablished.Payload[0]); // versionMajor
+                Assert.Equal((byte)1, (byte)tunnelEstablished.Payload[1]); // versionMinor
+
+                // The request itself uses the negotiated end-to-end version (e.g. HTTP/2).
+                Assert.Equal(version, requestVersion);
+            }, UseVersion.ToString()).DisposeAsync();
         }
 
         protected static async Task WaitForEventCountersAsync(ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)> events)
@@ -1040,6 +1139,30 @@ namespace System.Net.Http.Functional.Tests
                 return (string)dictionary["Name"] == "requests-started";
             }
         }
+
+        internal static async Task PrepareEventCountersAsync(TestEventListener listener)
+        {
+            // There is a race condition in EventSource where counters using IncrementingPollingCounter
+            // will drop increments that happened before the background timer thread first runs.
+            // See https://github.com/dotnet/runtime/issues/106268#issuecomment-2284626183.
+            // To workaround this issue, we ensure that the EventCounters timer is running before
+            // executing any of the interesting logic under test.
+
+            var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
+
+            await listener.RunWithCallbackAsync(e => events.Enqueue((e, e.ActivityId)), async () =>
+            {
+                await LoopbackServer.CreateClientAndServerAsync(
+                    async uri =>
+                    {
+                        using var client = new HttpClient();
+                        await client.GetStringAsync(uri);
+                    },
+                    server => server.HandleRequestAsync());
+
+                await WaitForEventCountersAsync(events);
+            });
+        }
     }
 
     public sealed class TelemetryTest_Http11 : TelemetryTest
@@ -1056,6 +1179,8 @@ namespace System.Net.Http.Functional.Tests
 
                 using var listener = new TestEventListener("System.Net.Http", EventLevel.Verbose, eventCounterInterval: 0.1d);
                 listener.AddActivityTracking();
+
+                await PrepareEventCountersAsync(listener);
 
                 var events = new ConcurrentQueue<(EventWrittenEventArgs Event, Guid ActivityId)>();
                 Uri expectedUri = null;
@@ -1107,7 +1232,7 @@ namespace System.Net.Http.Functional.Tests
 
                 EventWrittenEventArgs[] requestHeadersStart = events.Select(e => e.Event).Where(e => e.EventName == "RequestHeadersStart").ToArray();
                 Assert.Equal(NumParallelRequests, requestHeadersStart.Length);
-                HashSet<long> connectionIds = new(Enumerable.Range(0, NumParallelRequests).Select(i => (long)i));
+                HashSet<long> connectionIds = new(Enumerable.Range(1, NumParallelRequests).Select(i => (long)i));
                 foreach (EventWrittenEventArgs e in requestHeadersStart)
                 {
                     long connectionId = (long)e.Payload.Single();
@@ -1125,8 +1250,7 @@ namespace System.Net.Http.Functional.Tests
         public TelemetryTest_Http20(ITestOutputHelper output) : base(output) { }
     }
 
-    [Collection(nameof(DisableParallelization))]
-    [ConditionalClass(typeof(HttpClientHandlerTestBase), nameof(IsQuicSupported))]
+    [ConditionalClass(typeof(HttpClientHandlerTestBase), nameof(IsHttp3Supported))]
     public sealed class TelemetryTest_Http30 : TelemetryTest
     {
         protected override Version UseVersion => HttpVersion.Version30;

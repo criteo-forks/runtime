@@ -14,7 +14,7 @@ internal static partial class Interop
         internal static partial SafeEvpPKeyHandle EvpPkeyCreate();
 
         [LibraryImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_EvpPkeyDestroy")]
-        internal static partial void EvpPkeyDestroy(IntPtr pkey, IntPtr extraHandle);
+        internal static partial void EvpPkeyDestroy(IntPtr pkey);
 
         [LibraryImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_EvpPKeyBits")]
         internal static partial int EvpPKeyBits(SafeEvpPKeyHandle pkey);
@@ -37,15 +37,13 @@ internal static partial class Interop
         }
 
         [LibraryImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_UpRefEvpPkey")]
-        private static partial int UpRefEvpPkey(SafeEvpPKeyHandle handle, IntPtr extraHandle);
-
-        internal static int UpRefEvpPkey(SafeEvpPKeyHandle handle)
-        {
-            return UpRefEvpPkey(handle, handle.ExtraHandle);
-        }
+        internal static partial int UpRefEvpPkey(SafeEvpPKeyHandle handle);
 
         [LibraryImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_EvpPKeyType")]
         internal static partial EvpAlgorithmId EvpPKeyType(SafeEvpPKeyHandle handle);
+
+        [LibraryImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_EvpPKeyFamily")]
+        internal static partial EvpAlgorithmFamilyId EvpPKeyFamily(SafeEvpPKeyHandle handle);
 
         [LibraryImport(Libraries.CryptoNative)]
         private static unsafe partial SafeEvpPKeyHandle CryptoNative_DecodeSubjectPublicKeyInfo(
@@ -279,24 +277,42 @@ internal static partial class Interop
 
         [LibraryImport(Libraries.CryptoNative, StringMarshalling = StringMarshalling.Utf8)]
         private static partial IntPtr CryptoNative_LoadKeyFromProvider(
-            string providerName,
+            [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPUTF8Str, SizeParamIndex = 1)]
+            string[] providerNames,
+            int providerNameCount,
             string keyUri,
-            ref IntPtr extraHandle);
+            string? propertyQuery,
+            ref IntPtr extraHandle,
+            [MarshalAs(UnmanagedType.Bool)] out bool haveProvider);
 
         internal static SafeEvpPKeyHandle LoadKeyFromProvider(
-            string providerName,
-            string keyUri)
+            string[] providerNames,
+            string keyUri,
+            string? propertyQuery,
+            ref IntPtr extraHandle)
         {
-            IntPtr extraHandle = IntPtr.Zero;
             IntPtr evpPKeyHandle = IntPtr.Zero;
 
             try
             {
-                evpPKeyHandle = CryptoNative_LoadKeyFromProvider(providerName, keyUri, ref extraHandle);
+                evpPKeyHandle = CryptoNative_LoadKeyFromProvider(
+                    providerNames,
+                    providerNames.Length,
+                    keyUri,
+                    propertyQuery,
+                    ref extraHandle,
+                    out bool haveProvider);
 
+                if (!haveProvider)
+                {
+                    Debug.Assert(evpPKeyHandle == IntPtr.Zero && extraHandle == IntPtr.Zero, "both handles should be null if provider is not supported");
+                    throw new PlatformNotSupportedException(SR.PlatformNotSupported_CryptographyOpenSSLProvidersNotSupported);
+                }
+
+                // extraHandle should have been set to non-NULL during the key load even if it was NULL when
+                // LoadKeyFromProvider was called.
                 if (evpPKeyHandle == IntPtr.Zero || extraHandle == IntPtr.Zero)
                 {
-                    Debug.Assert(evpPKeyHandle == IntPtr.Zero, "extraHandle should not be null if evpPKeyHandle is not null");
                     throw CreateOpenSslCryptographicException();
                 }
 
@@ -304,9 +320,9 @@ internal static partial class Interop
             }
             catch
             {
-                if (evpPKeyHandle != IntPtr.Zero || extraHandle != IntPtr.Zero)
+                if (evpPKeyHandle != IntPtr.Zero)
                 {
-                    EvpPkeyDestroy(evpPKeyHandle, extraHandle);
+                    EvpPkeyDestroy(evpPKeyHandle);
                 }
 
                 throw;
@@ -319,6 +335,17 @@ internal static partial class Interop
             RSA = 6,
             DSA = 116,
             ECC = 408,
+        }
+
+        internal enum EvpAlgorithmFamilyId
+        {
+            Unknown = 0,
+            RSA = 1,
+            DSA = 2,
+            ECC = 3,
+            MLKem = 4,
+            SlhDsa = 5,
+            MLDsa = 6,
         }
     }
 }

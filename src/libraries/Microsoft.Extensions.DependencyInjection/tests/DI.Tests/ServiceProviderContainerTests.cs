@@ -371,7 +371,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             });
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public void GetAsyncService_DisposeAsyncOnSameThread_ThrowsAndDoesNotHangAndDisposeAsyncGetsCalled()
         {
             // Arrange
@@ -392,13 +392,13 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
                         var service = sp.GetRequiredService<DisposeServiceProviderInCtorAsyncDisposable>();
                     });
                 });
-            }).Wait(TimeSpan.FromSeconds(10));
+            }).Wait(TimeSpan.FromSeconds(20));
 
-            Assert.True(doesNotHang);
-            Assert.True(asyncDisposableResource.DisposeAsyncCalled);
+            Assert.True(doesNotHang, "!doesNotHang");
+            Assert.True(asyncDisposableResource.DisposeAsyncCalled, "!DisposeAsyncCalled");
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public void GetService_DisposeOnSameThread_ThrowsAndDoesNotHangAndDisposeGetsCalled()
         {
             // Arrange
@@ -525,7 +525,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public async Task GetRequiredService_ResolvingSameSingletonInTwoThreads_SameServiceReturned()
         {
             using (var mreForThread1 = new ManualResetEvent(false))
@@ -581,7 +581,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public async Task GetRequiredService_UsesSingletonAndLazyLocks_NoDeadlock()
         {
             using (var mreForThread1 = new ManualResetEvent(false))
@@ -669,7 +669,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public async Task GetRequiredService_BiggerObjectGraphWithOpenGenerics_NoDeadlock()
         {
             // Test is similar to GetRequiredService_UsesSingletonAndLazyLocks_NoDeadlock (but for open generics and a larger object graph)
@@ -1288,6 +1288,40 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             }
 
             Assert.Same(sp.GetRequiredService<IFakeOpenGenericService<Aa>>().Value.PropertyA, sp.GetRequiredService<A>());
+        }
+
+        [Fact]
+        public void ResolveKeyedServiceWithKeyedParameter_MissingRegistrationButWithUnkeyedService()
+        {
+            var serviceCollection = new ServiceCollection();
+
+            // We are not registering "service1" and "service1" keyed IService services and OtherService requires them,
+            // but we are registering an unkeyed IService service which should not be injected into OtherService.
+            serviceCollection.AddSingleton<KeyedDependencyInjectionSpecificationTests.IService, KeyedDependencyInjectionSpecificationTests.Service>();
+
+            serviceCollection.AddSingleton<KeyedDependencyInjectionSpecificationTests.OtherService>();
+
+            AggregateException ex = Assert.Throws<AggregateException>(() => serviceCollection.BuildServiceProvider(new ServiceProviderOptions
+            {
+                ValidateOnBuild = true
+            }));
+
+            Assert.Equal(1, ex.InnerExceptions.Count);
+            Assert.StartsWith("Some services are not able to be constructed", ex.Message);
+            Assert.Contains("ServiceType: Microsoft.Extensions.DependencyInjection.Specification.KeyedDependencyInjectionSpecificationTests+OtherService", ex.ToString());
+            Assert.Contains("Microsoft.Extensions.DependencyInjection.Specification.KeyedDependencyInjectionSpecificationTests+IService", ex.ToString());
+        }
+
+        [Fact]
+        public void InvalidConstrainedOpenGenericIsSkippedInEnumerableButThrowsInSingleResolution()
+        {
+            var sc = new ServiceCollection();
+            sc.AddSingleton(typeof(IBB<>), typeof(GenericBB<>));
+            sc.AddSingleton(typeof(IBB<>), typeof(ConstrainedGenericBB<>));
+            var sp = CreateServiceProvider(sc);
+
+            Assert.Single(sp.GetServices<IBB<IBB<string>>>());
+            Assert.Throws<ArgumentException>(() => sp.GetService<IBB<IBB<string>>>());
         }
 
         private async Task<bool> ResolveUniqueServicesConcurrently()

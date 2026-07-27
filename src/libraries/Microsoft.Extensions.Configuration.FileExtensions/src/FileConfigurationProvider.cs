@@ -6,14 +6,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Text;
-using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.Extensions.Configuration
 {
     /// <summary>
-    /// Base class for file based <see cref="ConfigurationProvider"/>.
+    /// Provides the base class for file-based <see cref="ConfigurationProvider"/> providers.
     /// </summary>
     public abstract class FileConfigurationProvider : ConfigurationProvider, IDisposable
     {
@@ -25,7 +25,7 @@ namespace Microsoft.Extensions.Configuration
         /// <param name="source">The source settings.</param>
         public FileConfigurationProvider(FileConfigurationSource source)
         {
-            ThrowHelper.ThrowIfNull(source);
+            ArgumentNullException.ThrowIfNull(source);
 
             Source = source;
 
@@ -33,23 +33,34 @@ namespace Microsoft.Extensions.Configuration
             {
                 _changeTokenRegistration = ChangeToken.OnChange(
                     () => Source.FileProvider.Watch(Source.Path!),
-                    () =>
+                    async () =>
                     {
-                        Thread.Sleep(Source.ReloadDelay);
-                        Load(reload: true);
+                        await Task.Delay(Source.ReloadDelay).ConfigureAwait(false);
+                        try
+                        {
+                            Load(reload: true);
+                        }
+                        catch
+                        {
+                            // Load already surfaces reload failures through the
+                            // FileConfigurationSource.OnLoadException callback. Any exception that
+                            // escapes here is usually swallowed by OnChange or by the FileProvider,
+                            // so swallow it here instead, to make it clear this is the intended behavior
+                            // and to make it more consistent.
+                        }
                     });
             }
         }
 
         /// <summary>
-        /// The source settings for this provider.
+        /// Gets the source settings for this provider.
         /// </summary>
         public FileConfigurationSource Source { get; }
 
         /// <summary>
         /// Generates a string representing this provider name and relevant details.
         /// </summary>
-        /// <returns> The configuration name. </returns>
+        /// <returns>The configuration name.</returns>
         public override string ToString()
             => $"{GetType().Name} for '{Source.Path}' ({(Source.Optional ? "Optional" : "Required")})";
 
@@ -156,7 +167,7 @@ namespace Microsoft.Extensions.Configuration
         public void Dispose() => Dispose(true);
 
         /// <summary>
-        /// Dispose the provider.
+        /// Disposes the provider.
         /// </summary>
         /// <param name="disposing"><c>true</c> if invoked from <see cref="IDisposable.Dispose"/>.</param>
         protected virtual void Dispose(bool disposing)

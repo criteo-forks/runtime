@@ -102,39 +102,39 @@ namespace System.IO.Compression
         /// If the file exists and is not a Zip file, a <code>ZipArchiveException</code> will be thrown.
         /// If the file exists and is empty or does not exist, a new Zip file will be created.
         /// Note that creating a Zip file with the <code>ZipArchiveMode.Create</code> mode is more efficient when creating a new Zip file.</param>
-        /// <param name="entryNameEncoding">The encoding to use when reading or writing entry names in this ZipArchive.
+        /// <param name="entryNameEncoding">The encoding to use when reading or writing entry names and comments in this ZipArchive.
         ///         ///     <para>NOTE: Specifying this parameter to values other than <c>null</c> is discouraged.
         ///         However, this may be necessary for interoperability with ZIP archive tools and libraries that do not correctly support
-        ///         UTF-8 encoding for entry names.<br />
+        ///         UTF-8 encoding for entry names or comments.<br />
         ///         This value is used as follows:</para>
         ///     <para><strong>Reading (opening) ZIP archive files:</strong></para>
         ///     <para>If <c>entryNameEncoding</c> is not specified (<c>== null</c>):</para>
         ///     <list>
         ///         <item>For entries where the language encoding flag (EFS) in the general purpose bit flag of the local file header is <em>not</em> set,
-        ///         use the current system default code page (<c>Encoding.Default</c>) in order to decode the entry name.</item>
+        ///         use the current system default code page (<c>Encoding.Default</c>) in order to decode the entry name and comment.</item>
         ///         <item>For entries where the language encoding flag (EFS) in the general purpose bit flag of the local file header <em>is</em> set,
-        ///         use UTF-8 (<c>Encoding.UTF8</c>) in order to decode the entry name.</item>
+        ///         use UTF-8 (<c>Encoding.UTF8</c>) in order to decode the entry name and comment.</item>
         ///     </list>
         ///     <para>If <c>entryNameEncoding</c> is specified (<c>!= null</c>):</para>
         ///     <list>
         ///         <item>For entries where the language encoding flag (EFS) in the general purpose bit flag of the local file header is <em>not</em> set,
-        ///         use the specified <c>entryNameEncoding</c> in order to decode the entry name.</item>
+        ///         use the specified <c>entryNameEncoding</c> in order to decode the entry name and comment.</item>
         ///         <item>For entries where the language encoding flag (EFS) in the general purpose bit flag of the local file header <em>is</em> set,
-        ///         use UTF-8 (<c>Encoding.UTF8</c>) in order to decode the entry name.</item>
+        ///         use UTF-8 (<c>Encoding.UTF8</c>) in order to decode the entry name and comment.</item>
         ///     </list>
         ///     <para><strong>Writing (saving) ZIP archive files:</strong></para>
         ///     <para>If <c>entryNameEncoding</c> is not specified (<c>== null</c>):</para>
         ///     <list>
-        ///         <item>For entry names that contain characters outside the ASCII range,
+        ///         <item>For entry names or comments that contain characters outside the ASCII range,
         ///         the language encoding flag (EFS) will be set in the general purpose bit flag of the local file header,
-        ///         and UTF-8 (<c>Encoding.UTF8</c>) will be used in order to encode the entry name into bytes.</item>
-        ///         <item>For entry names that do not contain characters outside the ASCII range,
+        ///         and UTF-8 (<c>Encoding.UTF8</c>) will be used in order to encode the entry name and comment into bytes.</item>
+        ///         <item>For entry names or comments that do not contain characters outside the ASCII range,
         ///         the language encoding flag (EFS) will not be set in the general purpose bit flag of the local file header,
-        ///         and the current system default code page (<c>Encoding.Default</c>) will be used to encode the entry names into bytes.</item>
+        ///         and the current system default code page (<c>Encoding.Default</c>) will be used to encode the entry names and comments into bytes.</item>
         ///     </list>
         ///     <para>If <c>entryNameEncoding</c> is specified (<c>!= null</c>):</para>
         ///     <list>
-        ///         <item>The specified <c>entryNameEncoding</c> will always be used to encode the entry names into bytes.
+        ///         <item>The specified <c>entryNameEncoding</c> will always be used to encode the entry names and comments into bytes.
         ///         The language encoding flag (EFS) in the general purpose bit flag of the local file header will be set if and only
         ///         if the specified <c>entryNameEncoding</c> is a UTF-8 encoding.</item>
         ///     </list>
@@ -143,42 +143,12 @@ namespace System.IO.Compression
         /// </param>
         public static ZipArchive Open(string archiveFileName, ZipArchiveMode mode, Encoding? entryNameEncoding)
         {
-            // Relies on FileStream's ctor for checking of archiveFileName
-
-            FileMode fileMode;
-            FileAccess access;
-            FileShare fileShare;
-
-            switch (mode)
-            {
-                case ZipArchiveMode.Read:
-                    fileMode = FileMode.Open;
-                    access = FileAccess.Read;
-                    fileShare = FileShare.Read;
-                    break;
-
-                case ZipArchiveMode.Create:
-                    fileMode = FileMode.CreateNew;
-                    access = FileAccess.Write;
-                    fileShare = FileShare.None;
-                    break;
-
-                case ZipArchiveMode.Update:
-                    fileMode = FileMode.OpenOrCreate;
-                    access = FileAccess.ReadWrite;
-                    fileShare = FileShare.None;
-                    break;
-
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(mode));
-            }
-
-            // Suppress CA2000: fs gets passed to the new ZipArchive, which stores it internally.
+            // the FileStream gets passed to the new ZipArchive, which stores it internally.
             // The stream will then be owned by the archive and be disposed when the archive is disposed.
-            // If the ctor completes without throwing, we know fs has been successfully stores in the archive;
-            // If the ctor throws, we need to close it here.
+            // If the ZipArchive ctor completes without throwing, we know fs has been successfully stores in the archive;
+            // If the ctor throws, we need to close it in a try finally for the ZipArchive.
 
-            FileStream fs = new FileStream(archiveFileName, fileMode, access, fileShare, bufferSize: 0x1000, useAsync: false);
+            FileStream fs = GetFileStreamForOpen(mode, archiveFileName, useAsync: false);
 
             try
             {
@@ -322,23 +292,23 @@ namespace System.IO.Compression
         /// <param name="includeBaseDirectory"><code>true</code> to indicate that a directory named <code>sourceDirectoryName</code> should
         /// be included at the root of the archive. <code>false</code> to indicate that the files and directories in <code>sourceDirectoryName</code>
         /// should be included directly in the archive.</param>
-        /// <param name="entryNameEncoding">The encoding to use when reading or writing entry names in this ZipArchive.
+        /// <param name="entryNameEncoding">The encoding to use when reading or writing entry names and comments in this ZipArchive.
         ///         ///     <para>NOTE: Specifying this parameter to values other than <c>null</c> is discouraged.
         ///         However, this may be necessary for interoperability with ZIP archive tools and libraries that do not correctly support
-        ///         UTF-8 encoding for entry names.<br />
+        ///         UTF-8 encoding for entry names or comments.<br />
         ///         This value is used as follows while creating the archive:</para>
         ///     <para>If <c>entryNameEncoding</c> is not specified (<c>== null</c>):</para>
         ///     <list>
-        ///         <item>For file names that contain characters outside the ASCII range:<br />
+        ///         <item>For file names or comments that contain characters outside the ASCII range:<br />
         ///         The language encoding flag (EFS) will be set in the general purpose bit flag of the local file header of the corresponding entry,
-        ///         and UTF-8 (<c>Encoding.UTF8</c>) will be used in order to encode the entry name into bytes.</item>
-        ///         <item>For file names that do not contain characters outside the ASCII range:<br />
+        ///         and UTF-8 (<c>Encoding.UTF8</c>) will be used in order to encode the entry name and comment into bytes.</item>
+        ///         <item>For file names or comments that do not contain characters outside the ASCII range:<br />
         ///         the language encoding flag (EFS) will not be set in the general purpose bit flag of the local file header of the corresponding entry,
-        ///         and the current system default code page (<c>Encoding.Default</c>) will be used to encode the entry names into bytes.</item>
+        ///         and the current system default code page (<c>Encoding.Default</c>) will be used to encode the entry names and comments into bytes.</item>
         ///     </list>
         ///     <para>If <c>entryNameEncoding</c> is specified (<c>!= null</c>):</para>
         ///     <list>
-        ///         <item>The specified <c>entryNameEncoding</c> will always be used to encode the entry names into bytes.
+        ///         <item>The specified <c>entryNameEncoding</c> will always be used to encode the entry names and comments into bytes.
         ///         The language encoding flag (EFS) in the general purpose bit flag of the local file header for each entry will be set if and only
         ///         if the specified <c>entryNameEncoding</c> is a UTF-8 encoding.</item>
         ///     </list>
@@ -408,7 +378,7 @@ namespace System.IO.Compression
         /// <param name="destination">The stream where the zip archive is to be stored.</param>
         /// <param name="compressionLevel">One of the enumeration values that indicates whether to emphasize speed or compression effectiveness when creating the entry.</param>
         /// <param name="includeBaseDirectory"><see langword="true" /> to include the directory name from <paramref name="sourceDirectoryName" /> at the root of the archive; <see langword="false" /> to include only the contents of the directory.</param>
-        /// <param name="entryNameEncoding">The encoding to use when reading or writing entry names in this archive. Specify a value for this parameter only when an encoding is required for interoperability with zip archive tools and libraries that do not support UTF-8 encoding for entry names.</param>
+        /// <param name="entryNameEncoding">The encoding to use when reading or writing entry names in this archive. Specify a value for this parameter only when an encoding is required for interoperability with zip archive tools and libraries that do not support UTF-8 encoding for entry names or comments.</param>
         /// <remarks>
         /// The directory structure from the file system is preserved in the archive. If the directory is empty, an empty archive is created.
         /// Use this method overload to specify the compression level and character encoding, and whether to include the base directory in the archive.
@@ -430,17 +400,59 @@ namespace System.IO.Compression
                                                CompressionLevel compressionLevel, bool includeBaseDirectory, Encoding? entryNameEncoding) =>
             DoCreateFromDirectory(sourceDirectoryName, destination, compressionLevel, includeBaseDirectory, entryNameEncoding);
 
+        /// <summary>
+        /// Creates a zip archive at the specified path containing the files and directories from the specified directory,
+        /// using the specified creation options.
+        /// </summary>
+        /// <param name="sourceDirectoryName">The path to the directory to be archived.</param>
+        /// <param name="destinationArchiveFileName">The path of the archive to be created.</param>
+        /// <param name="options">The creation options including compression level, encryption, encoding, and whether to include the base directory.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="sourceDirectoryName"/>, <paramref name="destinationArchiveFileName"/>, or <paramref name="options"/> is <see langword="null"/>.</exception>
+        public static void CreateFromDirectory(string sourceDirectoryName, string destinationArchiveFileName, ZipFileCreationOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            if (options.EncryptionMethod != ZipEncryptionMethod.None && options.Password.IsEmpty)
+            {
+                throw new ArgumentException(SR.EmptyPassword, nameof(options));
+            }
+
+            (sourceDirectoryName, destinationArchiveFileName) = GetFullPathsForDoCreateFromDirectory(sourceDirectoryName, destinationArchiveFileName);
+
+            using ZipArchive archive = Open(destinationArchiveFileName, ZipArchiveMode.Create, options.EntryNameEncoding);
+            CreateZipArchiveFromDirectory(sourceDirectoryName, archive, options.CompressionLevel, options.IncludeBaseDirectory, options.Password.Span, options.EncryptionMethod);
+        }
+
+        /// <summary>
+        /// Creates a zip archive in the specified stream containing the files and directories from the specified directory,
+        /// using the specified creation options.
+        /// </summary>
+        /// <param name="sourceDirectoryName">The path to the directory to be archived.</param>
+        /// <param name="destination">The stream where the zip archive is to be stored.</param>
+        /// <param name="options">The creation options including compression level, encryption, encoding, and whether to include the base directory.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="sourceDirectoryName"/>, <paramref name="destination"/>, or <paramref name="options"/> is <see langword="null"/>.</exception>
+        public static void CreateFromDirectory(string sourceDirectoryName, Stream destination, ZipFileCreationOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            if (options.EncryptionMethod != ZipEncryptionMethod.None && options.Password.IsEmpty)
+            {
+                throw new ArgumentException(SR.EmptyPassword, nameof(options));
+            }
+
+            sourceDirectoryName = ValidateAndGetFullPathForDoCreateFromDirectory(sourceDirectoryName, destination, options.CompressionLevel);
+
+            using ZipArchive archive = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true, options.EntryNameEncoding);
+            CreateZipArchiveFromDirectory(sourceDirectoryName, archive, options.CompressionLevel, options.IncludeBaseDirectory, options.Password.Span, options.EncryptionMethod);
+        }
+
         private static void DoCreateFromDirectory(string sourceDirectoryName, string destinationArchiveFileName,
                                                   CompressionLevel? compressionLevel, bool includeBaseDirectory, Encoding? entryNameEncoding)
 
         {
             // Rely on Path.GetFullPath for validation of sourceDirectoryName and destinationArchive
+            (sourceDirectoryName, destinationArchiveFileName) = GetFullPathsForDoCreateFromDirectory(sourceDirectoryName, destinationArchiveFileName);
 
             // Checking of compressionLevel is passed down to DeflateStream and the IDeflater implementation
             // as it is a pluggable component that completely encapsulates the meaning of compressionLevel.
-
-            sourceDirectoryName = Path.GetFullPath(sourceDirectoryName);
-            destinationArchiveFileName = Path.GetFullPath(destinationArchiveFileName);
 
             using ZipArchive archive = Open(destinationArchiveFileName, ZipArchiveMode.Create, entryNameEncoding);
             CreateZipArchiveFromDirectory(sourceDirectoryName, archive, compressionLevel, includeBaseDirectory);
@@ -448,6 +460,80 @@ namespace System.IO.Compression
 
         private static void DoCreateFromDirectory(string sourceDirectoryName, Stream destination,
                                                   CompressionLevel? compressionLevel, bool includeBaseDirectory, Encoding? entryNameEncoding)
+        {
+            sourceDirectoryName = ValidateAndGetFullPathForDoCreateFromDirectory(sourceDirectoryName, destination, compressionLevel);
+
+            using ZipArchive archive = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true, entryNameEncoding);
+            CreateZipArchiveFromDirectory(sourceDirectoryName, archive, compressionLevel, includeBaseDirectory);
+        }
+
+        private static void CreateZipArchiveFromDirectory(string sourceDirectoryName, ZipArchive archive,
+                                                          CompressionLevel? compressionLevel, bool includeBaseDirectory,
+                                                          ReadOnlySpan<char> password = default, ZipEncryptionMethod encryptionMethod = ZipEncryptionMethod.None)
+        {
+            (bool directoryIsEmpty, string basePath, DirectoryInfo di, FileSystemEnumerable<(string, CreateEntryType)> fse) =
+                InitializeCreateZipArchiveFromDirectory(sourceDirectoryName, includeBaseDirectory);
+
+            foreach ((string fullPath, CreateEntryType type) in fse)
+            {
+                directoryIsEmpty = false;
+
+                switch (type)
+                {
+                    case CreateEntryType.File:
+                        {
+                            string entryName = ArchivingUtils.EntryFromPath(fullPath.AsSpan(basePath.Length));
+                            ZipFileExtensions.DoCreateEntryFromFile(archive, fullPath, entryName, compressionLevel, password, encryptionMethod);
+                        }
+                        break;
+                    case CreateEntryType.Directory:
+                        if (ArchivingUtils.IsDirEmpty(fullPath))
+                        {
+                            string entryName = ArchivingUtils.EntryFromPath(fullPath.AsSpan(basePath.Length), appendPathSeparator: true);
+                            archive.CreateEntry(entryName);
+                        }
+                        break;
+                    case CreateEntryType.Unsupported:
+                    default:
+                        throw new IOException(SR.Format(SR.ZipUnsupportedFile, fullPath));
+                }
+            }
+
+            FinalizeCreateZipArchiveFromDirectory(archive, di, includeBaseDirectory, directoryIsEmpty);
+        }
+
+        private static FileStream GetFileStreamForOpen(ZipArchiveMode mode, string archiveFileName, bool useAsync)
+        {
+            // Check if the path is a directory before attempting to open,
+            // to match the UnauthorizedAccessException thrown by FileStream's ctor.
+            if (Directory.Exists(archiveFileName))
+            {
+                throw new UnauthorizedAccessException(SR.Format(SR.IO_DirectoryNotAllowed, archiveFileName));
+            }
+
+            (FileMode fileMode, FileAccess access, FileShare fileShare) = mode switch
+            {
+                ZipArchiveMode.Read => (FileMode.Open, FileAccess.Read, FileShare.Read),
+                ZipArchiveMode.Create => (FileMode.CreateNew, FileAccess.Write, FileShare.None),
+                ZipArchiveMode.Update => (FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None),
+                _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+            };
+
+            // Relies on FileStream's ctor for checking of archiveFileName
+            return new FileStream(archiveFileName, fileMode, access, fileShare, bufferSize: FileStreamBufferSize, useAsync);
+        }
+
+        private static (string, string) GetFullPathsForDoCreateFromDirectory(string sourceDirectoryName, string destinationArchiveFileName)
+        {
+            // Rely on Path.GetFullPath for validation of sourceDirectoryName and destinationArchive
+
+            sourceDirectoryName = Path.GetFullPath(sourceDirectoryName);
+            destinationArchiveFileName = Path.GetFullPath(destinationArchiveFileName);
+
+            return (sourceDirectoryName, destinationArchiveFileName);
+        }
+
+        private static string ValidateAndGetFullPathForDoCreateFromDirectory(string sourceDirectoryName, Stream destination, CompressionLevel? compressionLevel)
         {
             ArgumentNullException.ThrowIfNull(destination);
             if (!destination.CanWrite)
@@ -461,14 +547,10 @@ namespace System.IO.Compression
 
             // Rely on Path.GetFullPath for validation of sourceDirectoryName
 
-            sourceDirectoryName = Path.GetFullPath(sourceDirectoryName);
-
-            using ZipArchive archive = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true, entryNameEncoding);
-            CreateZipArchiveFromDirectory(sourceDirectoryName, archive, compressionLevel, includeBaseDirectory);
+            return Path.GetFullPath(sourceDirectoryName);
         }
 
-        private static void CreateZipArchiveFromDirectory(string sourceDirectoryName, ZipArchive archive,
-                                                          CompressionLevel? compressionLevel, bool includeBaseDirectory)
+        private static (bool, string, DirectoryInfo, FileSystemEnumerable<(string, CreateEntryType)>) InitializeCreateZipArchiveFromDirectory(string sourceDirectoryName, bool includeBaseDirectory)
         {
             bool directoryIsEmpty = true;
 
@@ -478,43 +560,25 @@ namespace System.IO.Compression
             string basePath = di.FullName;
 
             if (includeBaseDirectory && di.Parent != null)
+            {
                 basePath = di.Parent.FullName;
+            }
 
             FileSystemEnumerable<(string, CreateEntryType)> fse = CreateEnumerableForCreate(di.FullName);
 
-            foreach ((string fullPath, CreateEntryType type) in fse)
-            {
-                directoryIsEmpty = false;
+            return (directoryIsEmpty, basePath, di, fse);
+        }
 
-                switch (type)
-                {
-                    case CreateEntryType.File:
-                        {
-                            // Create entry for file:
-                            string entryName = ArchivingUtils.EntryFromPath(fullPath.AsSpan(basePath.Length));
-                            ZipFileExtensions.DoCreateEntryFromFile(archive, fullPath, entryName, compressionLevel);
-                        }
-                        break;
-                    case CreateEntryType.Directory:
-                        if (ArchivingUtils.IsDirEmpty(fullPath))
-                        {
-                            // Create entry marking an empty dir:
-                            // FullName never returns a directory separator character on the end,
-                            // but Zip archives require it to specify an explicit directory:
-                            string entryName = ArchivingUtils.EntryFromPath(fullPath.AsSpan(basePath.Length), appendPathSeparator: true);
-                            archive.CreateEntry(entryName);
-                        }
-                        break;
-                    case CreateEntryType.Unsupported:
-                    default:
-                        throw new IOException(SR.Format(SR.ZipUnsupportedFile, fullPath));
-                }
-            }
-
+        private static void FinalizeCreateZipArchiveFromDirectory(ZipArchive archive, DirectoryInfo di, bool includeBaseDirectory, bool directoryIsEmpty)
+        {
             // If no entries create an empty root directory entry:
             if (includeBaseDirectory && directoryIsEmpty)
+            {
                 archive.CreateEntry(ArchivingUtils.EntryFromPath(di.Name, appendPathSeparator: true));
+            }
         }
+
+        internal const int FileStreamBufferSize = 0x4000; // 16K
 
         private enum CreateEntryType
         {

@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel;
@@ -69,7 +69,7 @@ namespace System.Collections.Generic
                 // We use a non-randomized comparer for improved perf, falling back to a randomized comparer if the
                 // hash buckets become unbalanced.
                 if (typeof(T) == typeof(string) &&
-                    NonRandomizedStringEqualityComparer.GetStringComparer(_comparer!) is IEqualityComparer<string> stringComparer)
+                    NonRandomizedStringEqualityComparer.GetStringComparer(_comparer) is IEqualityComparer<string> stringComparer)
                 {
                     _comparer = (IEqualityComparer<T>)stringComparer;
                 }
@@ -92,7 +92,7 @@ namespace System.Collections.Generic
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.collection);
             }
 
-            if (collection is HashSet<T> otherAsHashSet && EqualityComparersAreEqual(this, otherAsHashSet))
+            if (collection is HashSet<T> otherAsHashSet && EffectiveEqualityComparersAreEqual(this, otherAsHashSet))
             {
                 ConstructFrom(otherAsHashSet);
             }
@@ -145,6 +145,8 @@ namespace System.Collections.Generic
         /// <summary>Initializes the HashSet from another HashSet with the same element type and equality comparer.</summary>
         private void ConstructFrom(HashSet<T> source)
         {
+            Debug.Assert(EffectiveEqualityComparersAreEqual(this, source), "must use identical effective comparers.");
+
             if (source.Count == 0)
             {
                 // As well as short-circuiting on the rest of the work done,
@@ -231,7 +233,7 @@ namespace System.Collections.Generic
                     // ValueType: Devirtualize with EqualityComparer<TValue>.Default intrinsic
                     int hashCode = item!.GetHashCode();
                     int i = GetBucketRef(hashCode) - 1; // Value in _buckets is 1-based
-                    while (i >= 0)
+                    while ((uint)i < (uint)entries.Length)
                     {
                         ref Entry entry = ref entries[i];
                         if (entry.HashCode == hashCode && EqualityComparer<T>.Default.Equals(entry.Value, item))
@@ -253,7 +255,7 @@ namespace System.Collections.Generic
                     Debug.Assert(comparer is not null);
                     int hashCode = item != null ? comparer.GetHashCode(item) : 0;
                     int i = GetBucketRef(hashCode) - 1; // Value in _buckets is 1-based
-                    while (i >= 0)
+                    while ((uint)i < (uint)entries.Length)
                     {
                         ref Entry entry = ref entries[i];
                         if (entry.HashCode == hashCode && comparer.Equals(entry.Value, item))
@@ -307,7 +309,7 @@ namespace System.Collections.Generic
                 ref int bucket = ref GetBucketRef(hashCode);
                 int i = bucket - 1; // Value in buckets is 1-based
 
-                while (i >= 0)
+                while ((uint)i < (uint)entries.Length)
                 {
                     ref Entry entry = ref entries[i];
 
@@ -366,6 +368,52 @@ namespace System.Collections.Generic
         #region AlternateLookup
 
         /// <summary>
+        /// Gets an instance of a type that may be used to perform operations on the current <see cref="HashSet{T}"/>
+        /// using a <typeparamref name="TAlternate"/> instead of a <typeparamref name="T"/>.
+        /// </summary>
+        /// <typeparam name="TAlternate">The alternate type of instance for performing lookups.</typeparam>
+        /// <returns>The created lookup instance.</returns>
+        /// <exception cref="InvalidOperationException">The set's comparer is not compatible with <typeparamref name="TAlternate"/>.</exception>
+        /// <remarks>
+        /// The set must be using a comparer that implements <see cref="IAlternateEqualityComparer{TAlternate, T}"/> with
+        /// <typeparamref name="TAlternate"/> and <typeparamref name="T"/>. If it doesn't, an exception will be thrown.
+        /// </remarks>
+        public AlternateLookup<TAlternate> GetAlternateLookup<TAlternate>()
+            where TAlternate : allows ref struct
+        {
+            if (!AlternateLookup<TAlternate>.IsCompatibleItem(this))
+            {
+                ThrowHelper.ThrowInvalidOperationException(ExceptionResource.InvalidOperation_IncompatibleComparer);
+            }
+
+            return new AlternateLookup<TAlternate>(this);
+        }
+
+        /// <summary>
+        /// Gets an instance of a type that may be used to perform operations on the current <see cref="HashSet{T}"/>
+        /// using a <typeparamref name="TAlternate"/> instead of a <typeparamref name="T"/>.
+        /// </summary>
+        /// <typeparam name="TAlternate">The alternate type of instance for performing lookups.</typeparam>
+        /// <param name="lookup">The created lookup instance when the method returns true, or a default instance that should not be used if the method returns false.</param>
+        /// <returns>true if a lookup could be created; otherwise, false.</returns>
+        /// <remarks>
+        /// The set must be using a comparer that implements <see cref="IAlternateEqualityComparer{TAlternate, T}"/> with
+        /// <typeparamref name="TAlternate"/> and <typeparamref name="T"/>. If it doesn't, the method returns false.
+        /// </remarks>
+        public bool TryGetAlternateLookup<TAlternate>(out AlternateLookup<TAlternate> lookup)
+            where TAlternate : allows ref struct
+        {
+            if (AlternateLookup<TAlternate>.IsCompatibleItem(this))
+            {
+                lookup = new AlternateLookup<TAlternate>(this);
+                return true;
+            }
+
+            lookup = default;
+            return false;
+        }
+
+        /// <summary>
         /// Provides a type that may be used to perform operations on a <see cref="HashSet{T}"/>
         /// using a <typeparamref name="TAlternate"/> instead of a <typeparamref name="T"/>.
         /// </summary>
@@ -396,7 +444,7 @@ namespace System.Collections.Generic
             internal static IAlternateEqualityComparer<TAlternate, T> GetAlternateComparer(HashSet<T> set)
             {
                 Debug.Assert(IsCompatibleItem(set));
-                return Unsafe.As<IAlternateEqualityComparer<TAlternate, T>>(set._comparer);
+                return Unsafe.As<IAlternateEqualityComparer<TAlternate, T>>(set._comparer)!;
             }
 
             /// <summary>Adds the specified element to a set.</summary>
@@ -425,7 +473,7 @@ namespace System.Collections.Generic
                 hashCode = comparer.GetHashCode(item);
                 bucket = ref set.GetBucketRef(hashCode);
                 int i = bucket - 1; // Value in _buckets is 1-based
-                while (i >= 0)
+                while ((uint)i < (uint)entries.Length)
                 {
                     ref Entry entry = ref entries[i];
                     if (entry.HashCode == hashCode && comparer.Equals(item, entry.Value))
@@ -451,7 +499,7 @@ namespace System.Collections.Generic
                 {
                     index = set._freeList;
                     set._freeCount--;
-                    Debug.Assert((StartOfFreeList - entries![set._freeList].Next) >= -1, "shouldn't overflow because `next` cannot underflow");
+                    Debug.Assert((StartOfFreeList - entries[set._freeList].Next) >= -1, "shouldn't overflow because `next` cannot underflow");
                     set._freeList = StartOfFreeList - entries[set._freeList].Next;
                 }
                 else
@@ -503,12 +551,12 @@ namespace System.Collections.Generic
                     uint collisionCount = 0;
                     int last = -1;
 
-                    int hashCode = item is not null ? comparer!.GetHashCode(item) : 0;
+                    int hashCode = item is not null ? comparer.GetHashCode(item) : 0;
 
                     ref int bucket = ref set.GetBucketRef(hashCode);
                     int i = bucket - 1; // Value in buckets is 1-based
 
-                    while (i >= 0)
+                    while ((uint)i < (uint)entries.Length)
                     {
                         ref Entry entry = ref entries[i];
 
@@ -756,6 +804,14 @@ namespace System.Collections.Generic
             if (other == null)
             {
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.other);
+            }
+
+            // If this set is empty and other is a HashSet with the same effective comparer,
+            // we can copy the data directly instead of adding each element individually.
+            if (Count == 0 && other is HashSet<T> otherAsSet && EffectiveEqualityComparersAreEqual(this, otherAsSet))
+            {
+                ConstructFrom(otherAsSet);
+                return;
             }
 
             foreach (T item in other)
@@ -1204,6 +1260,11 @@ namespace System.Collections.Generic
             }
         }
 
+        /// <summary>
+        /// Similar to <see cref="Comparer"/> but surfaces the actual comparer being used to hash entries.
+        /// </summary>
+        internal IEqualityComparer<T> EffectiveComparer => _comparer ?? EqualityComparer<T>.Default;
+
         /// <summary>Ensures that this hash set can hold the specified number of elements without growing.</summary>
         public int EnsureCapacity(int capacity)
         {
@@ -1380,7 +1441,7 @@ namespace System.Collections.Generic
                 int i = bucket - 1; // Value in _buckets is 1-based
 
                 // ValueType: Devirtualize with EqualityComparer<TValue>.Default intrinsic
-                while (i >= 0)
+                while ((uint)i < (uint)entries.Length)
                 {
                     ref Entry entry = ref entries[i];
                     if (entry.HashCode == hashCode && EqualityComparer<T>.Default.Equals(entry.Value, value))
@@ -1404,7 +1465,7 @@ namespace System.Collections.Generic
                 hashCode = value != null ? comparer.GetHashCode(value) : 0;
                 bucket = ref GetBucketRef(hashCode);
                 int i = bucket - 1; // Value in _buckets is 1-based
-                while (i >= 0)
+                while ((uint)i < (uint)entries.Length)
                 {
                     ref Entry entry = ref entries[i];
                     if (entry.HashCode == hashCode && comparer.Equals(entry.Value, value))
@@ -1428,7 +1489,7 @@ namespace System.Collections.Generic
             {
                 index = _freeList;
                 _freeCount--;
-                Debug.Assert((StartOfFreeList - entries![_freeList].Next) >= -1, "shouldn't overflow because `next` cannot underflow");
+                Debug.Assert((StartOfFreeList - entries[_freeList].Next) >= -1, "shouldn't overflow because `next` cannot underflow");
                 _freeList = StartOfFreeList - entries[_freeList].Next;
             }
             else
@@ -1527,7 +1588,7 @@ namespace System.Collections.Generic
             int intArrayLength = BitHelper.ToIntArrayLength(originalCount);
 
             Span<int> span = stackalloc int[StackAllocThreshold];
-            BitHelper bitHelper = intArrayLength <= StackAllocThreshold ?
+            BitHelper bitHelper = (uint)intArrayLength <= StackAllocThreshold ?
                 new BitHelper(span.Slice(0, intArrayLength), clear: true) :
                 new BitHelper(new int[intArrayLength], clear: false);
 
@@ -1662,7 +1723,7 @@ namespace System.Collections.Generic
         /// <param name="other"></param>
         /// <param name="returnIfUnfound">Allows us to finish faster for equals and proper superset
         /// because unfoundCount must be 0.</param>
-        private (int UniqueCount, int UnfoundCount) CheckUniqueAndUnfoundElements(IEnumerable<T> other, bool returnIfUnfound)
+        private unsafe (int UniqueCount, int UnfoundCount) CheckUniqueAndUnfoundElements(IEnumerable<T> other, bool returnIfUnfound)
         {
             // Need special case in case this has no elements.
             if (_count == 0)
@@ -1722,7 +1783,13 @@ namespace System.Collections.Generic
         /// </summary>
         internal static bool EqualityComparersAreEqual(HashSet<T> set1, HashSet<T> set2) => set1.Comparer.Equals(set2.Comparer);
 
-#endregion
+        /// <summary>
+        /// Checks if effective equality comparers are equal. This is used for algorithms that
+        /// require that both collections use identical hashing implementations for their entries.
+        /// </summary>
+        internal static bool EffectiveEqualityComparersAreEqual(HashSet<T> set1, HashSet<T> set2) => set1.EffectiveComparer.Equals(set2.EffectiveComparer);
+
+        #endregion
 
         private struct Entry
         {

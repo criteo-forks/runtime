@@ -4,7 +4,7 @@
 //
 // -----------------------------------------------------------------------------------------------------------
 //
-// Minimal Crst implementation based on CRITICAL_SECTION. Doesn't support much except for the basic locking
+// Minimal Crst implementation. Doesn't support much except for the basic locking
 // functionality (in particular there is no rank violation checking).
 //
 
@@ -15,7 +15,6 @@ enum CrstType
 {
     CrstHandleTable,
     CrstAllocHeap,
-    CrstInterfaceDispatchGlobalLists,
     CrstStressLog,
     CrstRestrictedCallouts,
     CrstGcStressControl,
@@ -51,7 +50,7 @@ public:
 #endif // _DEBUG
 
 private:
-    CRITICAL_SECTION    m_sCritSec;
+    minipal_mutex    m_Lock;
 #if defined(_DEBUG)
     EEThreadId          m_uiOwnerId;
 #endif // _DEBUG

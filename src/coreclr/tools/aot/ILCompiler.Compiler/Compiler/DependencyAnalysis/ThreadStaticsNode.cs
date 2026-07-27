@@ -37,7 +37,7 @@ namespace ILCompiler.DependencyAnalysis
             factory.ThreadStaticsRegion.AddEmbeddedObject(this);
         }
 
-        public static string GetMangledName(TypeDesc type, NameMangler nameMangler)
+        public static Utf8String GetMangledName(TypeDesc type, NameMangler nameMangler)
         {
             return nameMangler.NodeMangler.ThreadStatics(type);
         }
@@ -48,7 +48,7 @@ namespace ILCompiler.DependencyAnalysis
 
         public void AppendMangledName(NameMangler nameMangler, Utf8StringBuilder sb)
         {
-            string mangledName = _type == null ? "_inlinedThreadStatics" : GetMangledName(_type, nameMangler);
+            Utf8String mangledName = _type == null ? new Utf8String("_inlinedThreadStatics"u8) : GetMangledName(_type, nameMangler);
             sb.Append(mangledName);
         }
 
@@ -61,8 +61,9 @@ namespace ILCompiler.DependencyAnalysis
                     _inlined.GetOffsets(),
                     _inlined.GetSize(),
                     factory.Target.PointerSize);
+            bool requiresAlign8 = _type is not null && _type.ThreadGcStaticFieldAlignment.AsInt > factory.Target.PointerSize;
 
-            return factory.GCStaticEEType(map);
+            return factory.GCStaticEEType(map, requiresAlign8);
         }
 
         public override IEnumerable<DependencyListEntry> GetStaticDependencies(NodeFactory factory)

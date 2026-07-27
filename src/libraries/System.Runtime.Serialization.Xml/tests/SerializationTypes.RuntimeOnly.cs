@@ -836,6 +836,12 @@ namespace SerializationTypes
         }
     }
 
+    public class TypeWithXmlElementMemberAndSibling
+    {
+        public XmlElement Description { get; set; }
+        public string Name { get; set; }
+    }
+
     public class BaseType
     {
         public virtual string Name1 { get; set; }
@@ -1144,10 +1150,10 @@ namespace SerializationTypes
         Option0, Option1, Option2
     }
 
-    public class TypeWithNestedGenericClassImplementingIXmlSerialiable
+    public class TypeWithNestedGenericClassImplementingIXmlSerializable
     {
         // T can only be string
-        public class NestedGenericClassImplementingIXmlSerialiable<T> : IXmlSerializable
+        public class NestedGenericClassImplementingIXmlSerializable<T> : IXmlSerializable
         {
             public static bool WriteXmlInvoked = false;
             public static bool ReadXmlInvoked = false;
@@ -1155,7 +1161,7 @@ namespace SerializationTypes
             public string StringValue { get; set; }
             private T GenericValue { get; set; }
 
-            public NestedGenericClassImplementingIXmlSerialiable()
+            public NestedGenericClassImplementingIXmlSerializable()
             {
                 GenericValue = default(T);
             }
@@ -1255,6 +1261,31 @@ namespace SerializationTypes
         {
             return Id.GetHashCode() + Ts.GetHashCode();
         }
+    }
+
+    public class TypeWithObsoleteProperty
+    {
+        public string NormalProperty { get; set; }
+
+        [Obsolete("This property is obsolete but should still be serialized")]
+        public string ObsoleteProperty { get; set; }
+
+        [XmlIgnore]
+        public string IgnoredProperty { get; set; }
+    }
+
+    public class TypeWithObsoleteErrorProperty
+    {
+        public string NormalProperty { get; set; }
+
+        [Obsolete("This property is obsolete but should still be serialized")]
+        public string ObsoleteProperty { get; set; }
+
+        [Obsolete("This property is obsolete with error", true)]
+        public string ObsoletePropertyWithError { get; set; } = "error";
+
+        [XmlIgnore]
+        public string IgnoredProperty { get; set; }
     }
 
     public class BaseClassForInvalidDerivedClass
@@ -1463,6 +1494,92 @@ namespace SerializationTypes
         }
     }
 
+    public class TypeWithPrivateSetters
+    {
+        public TypeWithPrivateSetters() : this(100) { }
+        public TypeWithPrivateSetters(int privateSetter)
+        {
+            PrivateSetter = privateSetter;
+        }
+
+        public int PrivateSetter { get; private set; }
+    }
+
+    public class TypeWithNoSetters
+    {
+        public TypeWithNoSetters() : this(200) { }
+        public TypeWithNoSetters(int noSetter)
+        {
+            NoSetter = noSetter;
+        }
+
+        [XmlElement]
+        public int NoSetter { get; }
+    }
+
+    public class TypeWithPrivateOrNoSettersButIsIXmlSerializable : IXmlSerializable
+    {
+        private int _noSetter;
+        public int PrivateSetter { get; private set; }
+        public int NoSetter { get => _noSetter; }
+
+        // Default constructor
+        public TypeWithPrivateOrNoSettersButIsIXmlSerializable() : this(150, 250) { }
+
+        public TypeWithPrivateOrNoSettersButIsIXmlSerializable(int privateSetter, int noSetter)
+        {
+            PrivateSetter = privateSetter;
+            _noSetter = noSetter;
+        }
+
+        // Implement the IXmlSerializable methods
+        public System.Xml.Schema.XmlSchema GetSchema() => null;
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            reader.MoveToContent();
+            if (reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                return;
+            }
+
+            reader.ReadStartElement();
+            while (reader.NodeType != System.Xml.XmlNodeType.EndElement)
+            {
+                if (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case nameof(PrivateSetter):
+                            PrivateSetter = reader.ReadElementContentAsInt();
+                            break;
+                        case nameof(NoSetter):
+                            _noSetter = reader.ReadElementContentAsInt();
+                            break;
+                        default:
+                            reader.Skip();
+                            break;
+                    }
+                }
+                else
+                {
+                    reader.Skip();
+                }
+            }
+            reader.ReadEndElement();
+        }
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            writer.WriteStartElement(nameof(PrivateSetter));
+            writer.WriteValue(PrivateSetter);
+            writer.WriteEndElement();
+
+            writer.WriteStartElement(nameof(NoSetter));
+            writer.WriteValue(NoSetter);
+            writer.WriteEndElement();
+        }
+    }
+
     public class TypeWithListPropertiesWithoutPublicSetters
     {
         private List<string> _anotherStringList = new List<string>();
@@ -1472,29 +1589,112 @@ namespace SerializationTypes
             StaticProperty = "Static property should not be checked for public setter";
         }
 
-        public TypeWithListPropertiesWithoutPublicSetters()
+        public TypeWithListPropertiesWithoutPublicSetters() : this(true) { }
+        public TypeWithListPropertiesWithoutPublicSetters(bool createLists)
         {
-            PropertyWithXmlElementAttribute = new List<string>();
-            IntList = new MyGenericList<int>();
-            StringList = new List<string>();
-            PrivateIntListField = new List<int>();
-            PublicIntListField = new List<int>();
-            PublicIntListFieldWithXmlElementAttribute = new List<int>();
+            if (createLists)
+            {
+                PropertyWithXmlElementAttribute = new List<string>();
+                IntList = new MyGenericList<int>();
+                StringList = new List<string>();
+                PrivateIntListField = new List<int>();
+                PublicIntListField = new List<int>();
+                PublicIntListFieldWithXmlElementAttribute = new List<int>();
+            }
         }
 
         public static string StaticProperty { get; private set; }
 
-
+        // Try some things with list properties
         [XmlElement("PropWithXmlElementAttr")]
         public List<string> PropertyWithXmlElementAttribute { get; private set; }
         public MyGenericList<int> IntList { get; private set; }
+        [XmlArray(IsNullable = true)]
         public List<string> StringList { get; private set; }
         public List<string> AnotherStringList { get { return _anotherStringList; } }
 
+        // Try some things with null lists
+        public List<int> AlwaysNullList { get; }
+        [XmlArray(IsNullable = true)]
+        public List<int> AlwaysNullNullableList { get; }
+        [XmlElement("FieldWithXmlElementAttrAlwaysNull")]
+        public List<int> AlwaysNullIntListFieldWithXmlElementAttribute;
+        public List<string> AlwaysNullStringListField;
+
+        // Try some things with list fields
         private List<int> PrivateIntListField;
         public List<int> PublicIntListField;
         [XmlElement("FieldWithXmlElementAttr")]
         public List<int> PublicIntListFieldWithXmlElementAttribute;
+    }
+
+    public class TypeWithGetOnlyListsThatDoNotInitialize
+    {
+        // XmlSerializer always tries to make lists empty when deserializing. Some of these are ok, some will cause failures.
+        // Order matters.
+
+        // A field won't cause deserialization to fail since fields are always settable.
+        public List<string> AlwaysNullField;
+
+        // And the serializer is smart enough to leave a setter-less property alone.
+        public List<int> AlwaysNullPropertyNoSetter { get; }
+
+        // But a property with a private setter will cause deserialization to fail.
+        public List<int> AlwaysNullPropertyPrivateSetter { get; private set; }
+    }
+
+    public class BaseWithElementsAttributesPropertiesAndLists
+    {
+        public void Copy(BaseWithElementsAttributesPropertiesAndLists b)
+        {
+            StringField = b.StringField;
+            TextField = b.TextField;
+            ListProp = b.ListProp;
+            ListField = b.ListField;
+        }
+
+        [XmlElement]
+        public string StringField;
+
+        [XmlAttribute]
+        public string TextField;
+
+        [XmlArray]
+        public virtual List<string> ListProp { get; set; }
+
+        [XmlArray]
+        public List<string> ListField;
+    }
+
+    public class HideElementWithAttribute : BaseWithElementsAttributesPropertiesAndLists
+    {
+        [XmlAttribute]
+        public new string StringField;
+    }
+    public class HideAttributeWithElement : BaseWithElementsAttributesPropertiesAndLists
+    {
+        [XmlElement]
+        public new string TextField;
+    }
+    public class HideWithNewType : BaseWithElementsAttributesPropertiesAndLists
+    {
+        [XmlElement]
+        public new int TextField;
+    }
+    public class HideWithNewName : BaseWithElementsAttributesPropertiesAndLists
+    {
+        [XmlAttribute("NewStringField")]
+        public new string StringField;
+    }
+    public class HideArrayWithElement : BaseWithElementsAttributesPropertiesAndLists
+    {
+        [XmlElement]
+        public new List<string> ListField;
+    }
+    public class HideArrayWithRenamedElement : BaseWithElementsAttributesPropertiesAndLists
+    {
+        [XmlElement("NewListField")]
+        public new List<string> ListField;
     }
 
     public abstract class HighScoreManager<T> where T : HighScoreManager<T>.HighScoreBase
@@ -2049,20 +2249,40 @@ namespace SerializationTypes
         public int IntField;
     }
 
-    public class TypeWithPropertyHavingChoice
+    public class TypeWithPropertyHavingChoiceError
     {
         // The ManyChoices field can contain an array
         // of choices. Each choice must be matched to
         // an array item in the ChoiceArray field.
         [XmlChoiceIdentifier("ChoiceArray")]
-        [XmlElement("Item", typeof(string))]
+        [XmlElement("Item", typeof(ComplexChoiceA))]
         [XmlElement("Amount", typeof(int))]
-        public object[] ManyChoices { get; set; }
+        [XmlElement("NotAChoice", typeof(string))]
+        public object[] ManyChoices;
 
         // TheChoiceArray field contains the enumeration
         // values, one for each item in the ManyChoices array.
         [XmlIgnore]
         public MoreChoices[] ChoiceArray;
+    }
+
+    public enum AliasedChoiceType
+    {
+        [XmlEnum("Word")]
+        WordChoice,
+        [XmlEnum("Number")]
+        NumberChoice,
+    }
+
+    public class TypeWithAliasedChoiceIdentifier
+    {
+        [XmlChoiceIdentifier("ChoiceType")]
+        [XmlElement("Word", typeof(string))]
+        [XmlElement("Number", typeof(int))]
+        public object Item;
+
+        [XmlIgnore]
+        public AliasedChoiceType ChoiceType;
     }
 
     internal class MyFileStreamSurrogateProvider : ISerializationSurrogateProvider
@@ -2183,6 +2403,107 @@ namespace SerializationTypes
 
             return obj;
         }
+    }
+
+    // XmlSerializer test types: derived class overriding virtual [XmlText] property from base.
+    public class CustomerWithGroupIdRef
+    {
+        [XmlElement("GROUP_IDREF")]
+        public GroupIdRef? GroupIdRef { get; set; }
+    }
+
+    public abstract class GroupIdRefBase<TConcrete> where TConcrete : GroupIdRefBase<TConcrete>
+    {
+        public GroupIdRefBase() { Value = null!; }
+
+        public GroupIdRefBase(string value, string? type)
+        {
+            Type = type;
+            Value = value;
+        }
+
+        [XmlAttribute("type")]
+        public virtual string? Type { get; set; }
+
+        [XmlText]
+        public virtual string Value { get; set; }
+    }
+
+    public class GroupIdRef : GroupIdRefBase<GroupIdRef>
+    {
+        public GroupIdRef() { Value = null!; }
+
+        public GroupIdRef(string value, string? type)
+        {
+            Type = type;
+            Value = value;
+        }
+
+        [XmlAttribute("type")]
+        public override string? Type { get; set; }
+
+        [XmlText]
+        public override string Value { get; set; }
+    }
+
+    // XmlSerializer test types: overriding a virtual [XmlAttribute] property in a derived class.
+    // The base maps 'Code' to an attribute named "aprop".
+    public class GroupWithAttributeBase
+    {
+        [XmlAttribute("aprop")]
+        public virtual string? Code { get; set; }
+    }
+
+    // Valid override: re-applies [XmlAttribute] with the same name. The derived setter records
+    // that it was invoked so deserialization can be shown to assign the overridden property.
+    public class GroupWithSameNameAttributeOverride : GroupWithAttributeBase
+    {
+        private string? _code;
+
+        [XmlIgnore]
+        public bool DerivedSetterInvoked { get; private set; }
+
+        [XmlAttribute("aprop")]
+        public override string? Code
+        {
+            get => _code;
+            set
+            {
+                _code = value;
+                DerivedSetterInvoked = true;
+            }
+        }
+    }
+
+    // Invalid override: the override maps the same property to a different attribute name.
+    public class GroupWithRenamedAttributeOverride : GroupWithAttributeBase
+    {
+        [XmlAttribute("bprop")]
+        public override string? Code { get; set; }
+    }
+
+    // Invalid override: the override omits [XmlAttribute]. XmlSerializer reads member attributes
+    // without inheritance, so the override maps as an element and conflicts with the base attribute.
+    public class GroupWithDroppedAttributeOverride : GroupWithAttributeBase
+    {
+        public override string? Code { get; set; }
+    }
+
+    public class TypeWithArrayLikeFieldsOrdered
+    {
+        // Like TypeWithFieldsOrdered, the 'Order' values intentionally differ from the order of
+        // definition, and two string members share the ambiguous element name "strfld" so that
+        // honoring the declared order is required to read the fields correctly. The int array adds
+        // an array-like member in the middle of the sequence: it can match several repeated
+        // elements, and the sequence position only advances once a non-matching element is seen.
+        [XmlElement(Order = 3, ElementName = "strfld")]
+        public string StringField2;
+        [XmlElement(Order = 1, ElementName = "num")]
+        public int[] Numbers;
+        [XmlElement(Order = 0)]
+        public int Leading;
+        [XmlElement(Order = 2, ElementName = "strfld")]
+        public string StringField1;
     }
 }
 
@@ -4145,7 +4466,7 @@ public class MyArgumentException : Exception, ISerializable
         _paramName = paramName;
     }
 
-#if NET8_0_OR_GREATER
+#if NET
     [Obsolete("Exception..ctor(SerializationInfo, StreamingContext) is obsolete.", DiagnosticId = "SYSLIB0051")]
 #endif
     protected MyArgumentException(SerializationInfo info, StreamingContext context) : base(info, context) {
@@ -4164,7 +4485,7 @@ public class MyArgumentException : Exception, ISerializable
         }
     }
 
-#if NET8_0_OR_GREATER
+#if NET
     [Obsolete("Exception.GetObjectData is obsolete.", DiagnosticId = "SYSLIB0051")]
 #endif
     public override void GetObjectData(SerializationInfo info, StreamingContext context)

@@ -49,6 +49,8 @@ unsigned GetSizeForCorElementType(CorElementType etyp);
 
 class SigBuilder;
 class ArgDestination;
+class TokenLookupMap;
+class DynamicResolver;
 
 typedef const struct HardCodedMetaSig *LPHARDCODEDMETASIG;
 
@@ -83,7 +85,7 @@ class SigPointer : public SigParser
 
 public:
     // Constructor.
-    SigPointer() { LIMITED_METHOD_DAC_CONTRACT; }
+    SigPointer() : SigParser() { LIMITED_METHOD_DAC_CONTRACT; }
 
     // Copy constructor.
     SigPointer(const SigPointer & sig) : SigParser(sig)
@@ -125,9 +127,14 @@ public:
     //=========================================================================
 
 
-        void ConvertToInternalExactlyOne(Module* pSigModule, SigTypeContext *pTypeContext, SigBuilder * pSigBuilder, BOOL bSkipCustomModifier = TRUE);
-        void ConvertToInternalSignature(Module* pSigModule, SigTypeContext *pTypeContext, SigBuilder * pSigBuilder, BOOL bSkipCustomModifier = TRUE);
+        void ConvertToInternalExactlyOne(Module* pSigModule, const SigTypeContext *pTypeContext, SigBuilder * pSigBuilder, BOOL bSkipCustomModifier = TRUE);
+        void ConvertToInternalSignature(Module* pSigModule, const SigTypeContext *pTypeContext, SigBuilder * pSigBuilder, BOOL bSkipCustomModifier = TRUE);
 
+        // Copy the current part of the signature to the SigBuilder.
+        // All copy methods advance internal state as if a Get was called.
+        void CopyModOptsReqs(Module* pSigModule, SigBuilder* pSigBuilder);
+        void CopyExactlyOne(Module* pSigModule, SigBuilder* pSigBuilder);
+        void CopySignature(Module* pSigModule, SigBuilder* pSigBuilder, BYTE additionalCallConv);
 
     //=========================================================================
     // The CLOSED interface for reading signatures.  With the following
@@ -246,7 +253,7 @@ public:
                                          BOOL dropGenericArgumentLevel = FALSE,
                                          const Substitution *pSubst = NULL,
                                          const ZapSig::Context *pZapSigContext = NULL,
-                                         MethodTable *pMTInterfaceMapOwner = NULL,
+                                         MethodTable* pMTInterfaceMapOwner = NULL,
                                          HandleRecursiveGenericsForFieldLayoutLoad *pRecursiveFieldGenericHandling = NULL
                                          ) const;
 
@@ -277,7 +284,7 @@ public:
         //------------------------------------------------------------------------
         // Tests for the existence of a custom modifier
         //------------------------------------------------------------------------
-        BOOL HasCustomModifier(Module *pModule, LPCSTR szModName, CorElementType cmodtype) const;
+        BOOL HasCustomModifier(Module *pModule, LPCSTR szModName, CorElementType cmodtype, Module** pModifierScope = NULL, mdToken* pModifierType = NULL) const;
 
         //------------------------------------------------------------------------
         // Tests for ELEMENT_TYPE_CLASS or ELEMENT_TYPE_VALUETYPE followed by a TypeDef,
@@ -290,6 +297,7 @@ public:
 // forward declarations needed for the friends declared in Signature
 struct FrameInfo;
 struct VASigCookie;
+struct AsyncMethodData;
 #if defined(DACCESS_COMPILE)
 class  DacDbiInterfaceImpl;
 #endif // DACCESS_COMPILE
@@ -346,9 +354,20 @@ public:
     DWORD           GetRawSigLen() const;
 
 private:
+    friend struct ::cdac_data<VASigCookie>;
+    friend struct ::cdac_data<AsyncMethodData>;
+    friend struct ::cdac_data<Signature>;
+
     PCCOR_SIGNATURE m_pSig;
     DWORD           m_cbSig;
 };  // class Signature
+
+template<>
+struct cdac_data<Signature>
+{
+    static constexpr size_t SignaturePointer = offsetof(Signature, m_pSig);
+    static constexpr size_t SignatureLength = offsetof(Signature, m_cbSig);
+};
 
 
 #ifdef _DEBUG
@@ -606,7 +625,7 @@ class MetaSig
         // Does not count the "this" argument (which is not reflected on the
         // sig.) 64-bit arguments are counted as one argument.
         //------------------------------------------------------------------------
-        UINT NumFixedArgs()
+        UINT NumFixedArgs() const
         {
             LIMITED_METHOD_DAC_CONTRACT;
             return m_nArgs;
@@ -681,7 +700,7 @@ class MetaSig
         // Returns the calling convention & flags (see IMAGE_CEE_CS_CALLCONV_*
         // defines in cor.h)
         //----------------------------------------------------------
-        BYTE GetCallingConventionInfo()
+        USHORT GetCallingConventionInfo()
         {
             LIMITED_METHOD_DAC_CONTRACT;
 
@@ -691,7 +710,7 @@ class MetaSig
         //----------------------------------------------------------
         // Has a 'this' pointer?
         //----------------------------------------------------------
-        BOOL HasThis()
+        BOOL HasThis() const
         {
             LIMITED_METHOD_CONTRACT;
 
@@ -726,6 +745,26 @@ class MetaSig
             SUPPORTS_DAC;
             return GetCallingConvention() == IMAGE_CEE_CS_CALLCONV_VARARG;
         }
+
+        //----------------------------------------------------------
+        // Does it have a generic context argument?
+        //----------------------------------------------------------
+        BOOL HasGenericContextArg()
+        {
+            LIMITED_METHOD_CONTRACT;
+            return m_CallConv & CORINFO_CALLCONV_PARAMTYPE;
+        }
+
+        //----------------------------------------------------------
+        // Is it an async call?
+        //----------------------------------------------------------
+        bool IsAsyncCall()
+        {
+            LIMITED_METHOD_CONTRACT;
+            return m_CallConv & CORINFO_CALLCONV_ASYNCCALL;
+        }
+
+        BOOL HasAsyncContinuation();
 
         //----------------------------------------------------------
         // Is vararg?
@@ -945,6 +984,14 @@ class MetaSig
         //------------------------------------------------------------------
         CorElementType GetByRefType(TypeHandle* pTy) const;
 
+        //------------------------------------------------------------------
+        // Consume the custom modifiers, if any, in the current signature
+        // and update it.
+        // This is a non destructive operation if the current signature is not
+        // pointing at a sequence of ELEMENT_TYPE_CMOD_REQD or ELEMENT_TYPE_CMOD_OPT.
+        //------------------------------------------------------------------
+        static void ConsumeCustomModifiers(PCCOR_SIGNATURE& pSig, PCCOR_SIGNATURE pEndSig);
+
         // Struct used to capture in/out state during the comparison
         // of element types.
         struct CompareState
@@ -1061,19 +1108,6 @@ private:
                                              TokenPairList *pVisited);
 
 public:
-
-        //------------------------------------------------------------------
-        // Ensures that all the value types in the sig are loaded. This
-        // should be called on sig's that have value types before they
-        // are passed to Call(). This ensures that value classes will not
-        // be loaded during the operation to determine the size of the
-        // stack. Thus preventing the resulting GC hole.
-        //------------------------------------------------------------------
-        static void EnsureSigValueTypesLoaded(MethodDesc *pMD);
-
-        // this walks the sig and checks to see if all  types in the sig can be loaded
-        static void CheckSigTypesCanBeLoaded(MethodDesc *pMD);
-
         const SigTypeContext *GetSigTypeContext() const { LIMITED_METHOD_CONTRACT; return &m_typeContext; }
 
         // Disallow copy constructor.
@@ -1083,6 +1117,12 @@ public:
         {
             LIMITED_METHOD_CONTRACT;
             m_CallConv |= CORINFO_CALLCONV_PARAMTYPE;
+        }
+
+        void SetIsAsyncCall()
+        {
+            LIMITED_METHOD_CONTRACT;
+            m_CallConv |= CORINFO_CALLCONV_ASYNCCALL;
         }
 
         void SetTreatAsVarArg()
@@ -1122,7 +1162,7 @@ public:
 
         CorElementType  m_corNormalizedRetType;
         BYTE            m_flags;
-        BYTE            m_CallConv;
+        USHORT          m_CallConv;
 };  // class MetaSig
 
 BOOL IsTypeRefOrDef(LPCSTR szClassName, Module *pModule, mdToken token);
@@ -1166,6 +1206,8 @@ BOOL CompareTypeLayout(mdToken tk1, mdToken tk2, Module *pModule1, Module *pModu
 BOOL CompareTypeDefsForEquivalence(mdToken tk1, mdToken tk2, Module *pModule1, Module *pModule2, TokenPairList *pVisited);
 BOOL IsTypeDefEquivalent(mdToken tk, Module *pModule);
 BOOL IsTypeDefExternallyVisible(mdToken tk, Module *pModule, DWORD dwAttrs);
+
+CorInfoCallConvExtension GetUnmanagedCallConvExtension(MetaSig* pSig);
 
 void ReportPointersFromValueType(promote_func *fn, ScanContext *sc, PTR_MethodTable pMT, PTR_VOID pSrc);
 

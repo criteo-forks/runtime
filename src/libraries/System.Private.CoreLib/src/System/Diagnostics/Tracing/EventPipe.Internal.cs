@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -9,6 +10,7 @@ namespace System.Diagnostics.Tracing
 {
     internal static partial class EventPipeInternal
     {
+#if FEATURE_PERFTRACING
         //
         // These PInvokes are used by the configuration APIs to interact with EventPipe.
         //
@@ -64,5 +66,72 @@ namespace System.Diagnostics.Tracing
         [LibraryImport(RuntimeHelpers.QCall, EntryPoint = "EventPipeInternal_WaitForSessionSignal")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static unsafe partial bool WaitForSessionSignal(ulong sessionID, int timeoutMs);
+#else
+#pragma warning disable IDE0060
+        private static unsafe ulong Enable(
+            char* outputFile,
+            EventPipeSerializationFormat format,
+            uint circularBufferSizeInMB,
+            EventPipeProviderConfigurationNative* providers,
+            uint numProviders)
+        {
+            return 0;
+        }
+
+        internal static void Disable(ulong sessionID)
+        {
+        }
+
+        internal static unsafe IntPtr CreateProvider(string providerName,
+            delegate* unmanaged<byte*, int, byte, long, long, Interop.Advapi32.EVENT_FILTER_DESCRIPTOR*, void*, void> callbackFunc,
+            void* callbackContext)
+        {
+            return IntPtr.Zero;
+        }
+
+        internal static unsafe IntPtr DefineEvent(IntPtr provHandle, uint eventID, long keywords, uint eventVersion, uint level, void *pMetadata, uint metadataLength)
+        {
+            return IntPtr.Zero;
+        }
+
+        internal static IntPtr GetProvider(string providerName)
+        {
+            return IntPtr.Zero;
+        }
+
+        internal static void DeleteProvider(IntPtr provHandle)
+        {
+        }
+
+        internal static int EventActivityIdControl(uint controlCode, ref Guid activityId)
+        {
+            return 0;
+        }
+
+        internal static unsafe void WriteEventData(IntPtr eventHandle, EventProvider.EventData* pEventData, uint dataCount, Guid* activityId, Guid* relatedActivityId)
+        {
+        }
+
+        internal static unsafe bool GetSessionInfo(ulong sessionID, EventPipeSessionInfo* pSessionInfo)
+        {
+            return false;
+        }
+
+        internal static unsafe bool GetNextEvent(ulong sessionID, EventPipeEventInstanceData* pInstance)
+        {
+            return false;
+        }
+
+        internal static unsafe bool SignalSession(ulong sessionID)
+        {
+            return false;
+        }
+
+        internal static unsafe bool WaitForSessionSignal(ulong sessionID, int timeoutMs)
+        {
+            return false;
+        }
+#pragma warning restore IDE0060
+#endif //FEATURE_PERFTRACING
     }
 }

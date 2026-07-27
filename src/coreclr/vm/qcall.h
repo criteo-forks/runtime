@@ -20,14 +20,8 @@
 // GC mode like a normal P/Invoke. These two features should make QCalls easier to write reliably compared to FCalls.
 // QCalls are not prone to GC holes and GC starvation bugs that are common with FCalls.
 //
-// QCalls perform better compared to FCalls w/ HelperMethodFrame. The QCall overhead is about 1.4x less compared to
-// FCall w/ HelperMethodFrame overhead on x86. The performance is about the same on x64. However, the implementation
-// of P/Invoke marshaling on x64 is not tuned for performance yet. The QCalls should become significantly faster compared
-// to FCalls w/ HelperMethodFrame on x64 as we do performance tuning of P/Invoke marshaling on x64.
-//
-//
 // The preferred type of QCall arguments is primitive types that efficiently handled by the P/Invoke marshaler (INT32, LPCWSTR, BOOL).
-// (Notice that BOOL is the correct boolean flavor for QCall arguments. CLR_BOOL is the correct boolean flavor for FCall arguments.)
+// (Notice that BOOL is the correct boolean flavor for QCall arguments. FC_BOOL_ARG is the correct boolean flavor for FCall arguments.)
 //
 // The pointers to common unmanaged EE structures should be wrapped into helper handle types. This is to make the managed implementation
 // type safe and avoid falling into unsafe C# everywhere. See the AssemblyHandle below for a good example.
@@ -116,12 +110,14 @@
 #endif // !TARGET_UNIX
 
 #define BEGIN_QCALL                      \
+    INSTALL_RESUME_AFTER_CATCH_HANDLER_WITH_FRAME(GetThread()->GetFrame()) \
     INSTALL_MANAGED_EXCEPTION_DISPATCHER \
     INSTALL_UNWIND_AND_CONTINUE_HANDLER
 
 #define END_QCALL                         \
     UNINSTALL_UNWIND_AND_CONTINUE_HANDLER \
-    UNINSTALL_MANAGED_EXCEPTION_DISPATCHER
+    UNINSTALL_MANAGED_EXCEPTION_DISPATCHER \
+    UNINSTALL_RESUME_AFTER_CATCH_HANDLER_WITH_FRAME
 
 #define QCALL_CHECK             \
     THROWS;                     \
@@ -129,8 +125,8 @@
     MODE_PREEMPTIVE;            \
 
 #define QCALL_CHECK_NO_GC_TRANSITION    \
-    THROWS;                             \
-    GC_TRIGGERS;                        \
+    NOTHROW;                            \
+    GC_NOTRIGGER;                       \
     MODE_COOPERATIVE;                   \
 
 #define QCALL_CONTRACT CONTRACTL { QCALL_CHECK; } CONTRACTL_END;
@@ -196,14 +192,26 @@ public:
     //
     // ObjectHandleOnStack type is used for managed objects
     //
-    struct ObjectHandleOnStack
+    struct ObjectHandleOnStack final
     {
-        Object ** m_ppObject;
+        Object** m_ppObject;
+
+        bool IsNull() const
+        {
+            LIMITED_METHOD_CONTRACT;
+            return *m_ppObject == NULL;
+        }
 
         OBJECTREF Get()
         {
             LIMITED_METHOD_CONTRACT;
             return ObjectToOBJECTREF(*m_ppObject);
+        }
+
+        Object** GetObjectPointer() const
+        {
+            LIMITED_METHOD_CONTRACT;
+            return m_ppObject;
         }
 
 #ifndef DACCESS_COMPILE
@@ -232,6 +240,38 @@ public:
     };
 
     //
+    // ByteRefOnStack type is used for returning on stack byref to byte.
+    //
+    struct ByteRefOnStack final
+    {
+        struct ByteRef
+        {
+            BYTE* m_pByte;
+        };
+
+        ByteRef* m_pByteRef;
+
+#ifndef DACCESS_COMPILE
+        void Set(BYTE* data)
+        {
+            CONTRACTL
+            {
+                NOTHROW;
+                GC_NOTRIGGER;
+                MODE_COOPERATIVE;
+                PRECONDITION(m_pByteRef != NULL);
+            }
+            CONTRACTL_END;
+
+            // The space for the return value has to be on the stack
+            _ASSERTE(Thread::IsAddressInCurrentStack(m_pByteRef));
+
+            m_pByteRef->m_pByte = data;
+        }
+#endif // !DACCESS_COMPILE
+    };
+
+    //
     // StackCrawlMarkHandle is used for passing StackCrawlMark into QCalls
     //
     struct StackCrawlMarkHandle
@@ -248,15 +288,15 @@ public:
     struct AssemblyHandle
     {
         Object ** m_ppObject;
-        DomainAssembly * m_pAssembly;
+        Assembly * m_pAssembly;
 
-        operator DomainAssembly * ()
+        operator Assembly * ()
         {
             LIMITED_METHOD_CONTRACT;
             return m_pAssembly;
         }
 
-        DomainAssembly * operator->() const
+        Assembly * operator->() const
         {
             LIMITED_METHOD_CONTRACT;
             return m_pAssembly;

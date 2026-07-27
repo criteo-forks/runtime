@@ -131,6 +131,9 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                             }
                         case DictionarySpec dictionarySpec:
                             {
+                                // Base case to avoid stack overflow for recursive object graphs.
+                                _seenTransitiveTypes.Add(typeRef, true);
+
                                 bool shouldRegister = _typeIndex.CanBindTo(typeRef) &&
                                     TryRegisterTransitiveTypesForMethodGen(dictionarySpec.KeyTypeRef) &&
                                     TryRegisterTransitiveTypesForMethodGen(dictionarySpec.ElementTypeRef) &&
@@ -145,6 +148,9 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                             }
                         case CollectionSpec collectionSpec:
                             {
+                                // Base case to avoid stack overflow for recursive object graphs.
+                                _seenTransitiveTypes.Add(typeRef, true);
+
                                 if (_typeIndex.GetTypeSpec(collectionSpec.ElementTypeRef) is ComplexTypeSpec)
                                 {
                                     _namespaces.Add("System.Linq");
@@ -157,8 +163,7 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                             {
                                 // Base case to avoid stack overflow for recursive object graphs.
                                 // Register all object types for gen; we need to throw runtime exceptions in some cases.
-                                bool shouldRegister = true;
-                                _seenTransitiveTypes.Add(typeRef, shouldRegister);
+                                _seenTransitiveTypes.Add(typeRef, true);
 
                                 // List<string> is used in generated code as a temp holder for formatting
                                 // an error for config properties that don't map to object properties.
@@ -168,6 +173,14 @@ namespace Microsoft.Extensions.Configuration.Binder.SourceGeneration
                                 {
                                     foreach (PropertySpec property in objectSpec.Properties!)
                                     {
+                                        // Skip types reachable only through non-bindable properties, unless the
+                                        // property backs a constructor parameter. Constructor parameters are always
+                                        // bound in the Initialize method, so their types must still be registered.
+                                        if (!_typeIndex.ShouldBindTo(property) && property.MatchingCtorParam is null)
+                                        {
+                                            continue;
+                                        }
+
                                         TryRegisterTransitiveTypesForMethodGen(property.TypeRef);
 
                                         if (_typeIndex.GetTypeSpec(property.TypeRef) is ComplexTypeSpec)

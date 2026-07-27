@@ -9,6 +9,7 @@ using System.Runtime.Serialization;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema.Tests;
 using System.Text.Json.Serialization;
+using System.Xml.Linq;
 
 namespace System.Text.Json.SourceGeneration.Tests
 {
@@ -28,7 +29,7 @@ namespace System.Text.Json.SourceGeneration.Tests
         [JsonSerializable(typeof(float))]
         [JsonSerializable(typeof(double))]
         [JsonSerializable(typeof(decimal))]
-#if NETCOREAPP
+#if NET
         [JsonSerializable(typeof(UInt128))]
         [JsonSerializable(typeof(Int128))]
         [JsonSerializable(typeof(Half))]
@@ -40,8 +41,9 @@ namespace System.Text.Json.SourceGeneration.Tests
         [JsonSerializable(typeof(ReadOnlyMemory<byte>))]
         [JsonSerializable(typeof(DateTime))]
         [JsonSerializable(typeof(DateTimeOffset))]
+        [JsonSerializable(typeof(DateTimeOffset?))]
         [JsonSerializable(typeof(TimeSpan))]
-#if NETCOREAPP
+#if NET
         [JsonSerializable(typeof(DateOnly))]
         [JsonSerializable(typeof(TimeOnly))]
 #endif
@@ -70,6 +72,10 @@ namespace System.Text.Json.SourceGeneration.Tests
         [JsonSerializable(typeof(bool?))]
         [JsonSerializable(typeof(int?))]
         [JsonSerializable(typeof(double?))]
+        [JsonSerializable(typeof(float?))]
+#if NET
+        [JsonSerializable(typeof(Half?))]
+#endif
         [JsonSerializable(typeof(Guid?))]
         [JsonSerializable(typeof(JsonElement?))]
         [JsonSerializable(typeof(IntEnum?))]
@@ -85,9 +91,11 @@ namespace System.Text.Json.SourceGeneration.Tests
         [JsonSerializable(typeof(PocoWithCustomNaming))]
         [JsonSerializable(typeof(PocoWithCustomNumberHandling))]
         [JsonSerializable(typeof(PocoWithCustomNumberHandlingOnProperties))]
+        [JsonSerializable(typeof(PocoWithNullableFloatingPoint))]
         [JsonSerializable(typeof(PocoWithRecursiveMembers))]
         [JsonSerializable(typeof(PocoWithRecursiveCollectionElement))]
         [JsonSerializable(typeof(PocoWithRecursiveDictionaryValue))]
+        [JsonSerializable(typeof(PocoWithNonRecursiveDuplicateOccurrences))]
         [JsonSerializable(typeof(PocoWithDescription))]
         [JsonSerializable(typeof(PocoWithCustomConverter))]
         [JsonSerializable(typeof(PocoWithCustomPropertyConverter))]
@@ -107,6 +115,12 @@ namespace System.Text.Json.SourceGeneration.Tests
         [JsonSerializable(typeof(PocoCombiningPolymorphicTypeAndDerivedTypes))]
         [JsonSerializable(typeof(ClassWithComponentModelAttributes))]
         [JsonSerializable(typeof(ClassWithJsonPointerEscapablePropertyNames))]
+        [JsonSerializable(typeof(ClassWithPropertyNameRequiringFragmentEncoding))]
+        [JsonSerializable(typeof(ClassWithOptionalObjectParameter))]
+        [JsonSerializable(typeof(ClassWithPropertiesUsingCustomConverters))]
+#pragma warning disable CS0612 // Type or member is obsolete
+        [JsonSerializable(typeof(MyObsoleteType))]
+#pragma warning restore CS0612 // Type or member is obsolete
         // Collection types
         [JsonSerializable(typeof(int[]))]
         [JsonSerializable(typeof(List<bool>))]
@@ -124,6 +138,7 @@ namespace System.Text.Json.SourceGeneration.Tests
         [JsonSerializable(typeof(Dictionary<string, object>))]
         [JsonSerializable(typeof(Hashtable))]
         [JsonSerializable(typeof(StructDictionary<string, int>))]
+        [JsonSerializable(typeof(XElement))]
         public partial class TestTypesContext : JsonSerializerContext;
     }
 }

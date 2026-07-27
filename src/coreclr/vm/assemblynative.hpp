@@ -19,23 +19,20 @@ class CustomAssemblyBinder;
 
 class AssemblyNative
 {
-    friend class Assembly;
-    friend class BaseDomain;
-    friend class DomainAssembly;
-
 public:
 
     static Assembly* LoadFromPEImage(AssemblyBinder* pBinder, PEImage *pImage, bool excludeAppPaths = false);
 
     // static FCALLs
-    static FCDECL0(FC_BOOL_RET, IsTracingEnabled);
+    FCDECL0(static FC_BOOL_RET, IsTracingEnabled);
 
     //
     // instance FCALLs
     //
 
-    static
-    FCDECL1(FC_BOOL_RET, IsDynamic, AssemblyBaseObject * pAssemblyUNSAFE);
+    FCDECL1(static FC_BOOL_RET, GetIsDynamic, Assembly* pAssembly);
+
+    FCDECL1(static FC_BOOL_RET, GetIsCollectible, Assembly* pAssembly);
 };
 
 extern "C" uint32_t QCALLTYPE AssemblyNative_GetAssemblyCount();
@@ -112,15 +109,13 @@ extern "C" void QCALLTYPE AssemblyNative_GetEntryPoint(QCall::AssemblyHandle pAs
 extern "C" void QCALLTYPE AssemblyNative_GetImageRuntimeVersion(QCall::AssemblyHandle pAssembly, QCall::StringHandleOnStack retString);
 
 
-extern "C" BOOL QCALLTYPE AssemblyNative_GetIsCollectible(QCall::AssemblyHandle pAssembly);
-
-extern "C" INT_PTR QCALLTYPE AssemblyNative_InitializeAssemblyLoadContext(INT_PTR ptrManagedAssemblyLoadContext, BOOL fRepresentsTPALoadContext, BOOL fIsCollectible);
+extern "C" INT_PTR QCALLTYPE AssemblyNative_InitializeAssemblyLoadContext(INT_PTR ptrAssemblyLoadContext, BOOL fRepresentsTPALoadContext, BOOL fIsCollectible);
 
 extern "C" void QCALLTYPE AssemblyNative_PrepareForAssemblyLoadContextRelease(INT_PTR ptrNativeAssemblyBinder, INT_PTR ptrManagedStrongAssemblyLoadContext);
 
 extern "C" void QCALLTYPE AssemblyNative_InternalLoad(NativeAssemblyNameParts* pAssemblyName, QCall::ObjectHandleOnStack requestingAssembly, QCall::StackCrawlMarkHandle stackMark,BOOL fThrowOnFileNotFound, QCall::ObjectHandleOnStack assemblyLoadContext, QCall::ObjectHandleOnStack retAssembly);
 
-extern "C" void QCALLTYPE AssemblyNative_LoadFromPath(INT_PTR ptrNativeAssemblyBinder, LPCWSTR pwzILPath, LPCWSTR pwzNIPath, QCall::ObjectHandleOnStack retLoadedAssembly);
+extern "C" void QCALLTYPE AssemblyNative_LoadFromPath(INT_PTR ptrNativeAssemblyBinder, LPCWSTR pwzILPath, QCall::ObjectHandleOnStack retLoadedAssembly);
 
 extern "C" void QCALLTYPE AssemblyNative_LoadFromStream(INT_PTR ptrNativeAssemblyBinder, INT_PTR ptrAssemblyArray, INT32 cbAssemblyArrayLength, INT_PTR ptrSymbolArray, INT32 cbSymbolArrayLength, QCall::ObjectHandleOnStack retLoadedAssembly);
 #ifdef TARGET_WINDOWS
@@ -147,5 +142,45 @@ extern "C" void QCALLTYPE AssemblyNative_ApplyUpdate(QCall::AssemblyHandle assem
 extern "C" BOOL QCALLTYPE AssemblyNative_IsApplyUpdateSupported();
 
 extern "C" void QCALLTYPE AssemblyName_InitializeAssemblySpec(NativeAssemblyNameParts* pAssemblyNameParts, BaseAssemblySpec* pAssemblySpec);
+
+// See TypeMapLazyDictionary.cs for managed version.
+struct CallbackContext final
+{
+    OBJECTREF _currAssembly;
+    OBJECTREF _groupType;
+    OBJECTREF _externalTypeMap;
+    OBJECTREF _proxyTypeMap;
+    OBJECTREF _creationException;
+};
+
+// See TypeMapLazyDictionary.cs for managed version.
+struct ProcessAttributesCallbackArg final
+{
+    char const* Utf8String1;
+    char const* Utf8String2;
+    int32_t StringLen1;
+    int32_t StringLen2;
+};
+
+extern "C" void QCALLTYPE TypeMapLazyDictionary_ProcessAttributes(
+    QCall::AssemblyHandle pAssembly,
+    QCall::TypeHandle pTypeGroup,
+    BOOL (*newExternalTypeEntry)(CallbackContext* context, ProcessAttributesCallbackArg* arg),
+    BOOL (*newProxyTypeEntry)(CallbackContext* context, ProcessAttributesCallbackArg* arg),
+    BOOL (*newPrecachedExternalTypeMap)(CallbackContext* context),
+    BOOL (*newPrecachedProxyTypeMap)(CallbackContext* context),
+    CallbackContext* context);
+
+extern "C" TADDR QCALLTYPE TypeMapLazyDictionary_FindPrecachedExternalTypeMapEntry(
+    QCall::ModuleHandle pModule,
+    QCall::TypeHandle pGroupType,
+    LPCUTF8 key
+);
+
+extern "C" TADDR QCALLTYPE TypeMapLazyDictionary_FindPrecachedProxyTypeMapEntry(
+    QCall::ModuleHandle pModule,
+    QCall::TypeHandle pGroupType,
+    QCall::TypeHandle pType
+);
 
 #endif

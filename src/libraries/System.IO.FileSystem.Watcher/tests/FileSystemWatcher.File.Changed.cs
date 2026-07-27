@@ -9,7 +9,6 @@ namespace System.IO.Tests
     public class File_Changed_Tests : FileSystemWatcherTest
     {
         [Fact]
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/103584", TestPlatforms.Windows)]
         public void FileSystemWatcher_File_Changed_LastWrite()
         {
             string file = CreateTestFile(TestDirectory, "file");

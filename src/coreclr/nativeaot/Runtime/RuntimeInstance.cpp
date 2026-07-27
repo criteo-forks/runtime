@@ -1,11 +1,12 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
+
 #include "common.h"
 #include "CommonTypes.h"
 #include "CommonMacros.h"
 #include "daccess.h"
-#include "PalRedhawkCommon.h"
-#include "PalRedhawk.h"
+#include "PalLimitedContext.h"
+#include "Pal.h"
 #include "rhassert.h"
 #include "slist.h"
 #include "holder.h"
@@ -21,10 +22,8 @@
 #include "shash.h"
 #include "TypeManager.h"
 #include "MethodTable.h"
-#include "varint.h"
 
 #include "CommonMacros.inl"
-#include "slist.inl"
 #include "MethodTable.inl"
 #include "../../inc/clrversion.h"
 
@@ -40,7 +39,7 @@ uint8_t g_CrashInfoBuffer[MAX_CRASHINFOBUFFER_SIZE] = { 0 };
 
 ThreadStore *   RuntimeInstance::GetThreadStore()
 {
-    return m_pThreadStore;
+    return ThreadStore::s_pThreadStore;
 }
 
 FCIMPL1(uint8_t *, RhGetCrashInfoBuffer, int32_t* pcbMaxSize)
@@ -52,9 +51,9 @@ FCIMPLEND
 
 #if TARGET_UNIX
 #include "PalCreateDump.h"
-FCIMPL2(void, RhCreateCrashDumpIfEnabled, PEXCEPTION_RECORD pExceptionRecord, PCONTEXT pExContext)
+FCIMPL1(void, RhCreateCrashDumpIfEnabled, PEXCEPTION_RECORD pExceptionRecord)
 {
-    PalCreateCrashDumpIfEnabled(pExceptionRecord, pExContext);
+    PalCreateCrashDumpIfEnabled(pExceptionRecord);
 }
 FCIMPLEND
 #endif
@@ -180,7 +179,6 @@ RuntimeInstance::OsModuleList* RuntimeInstance::GetOsModuleList()
 #ifndef DACCESS_COMPILE
 
 RuntimeInstance::RuntimeInstance() :
-    m_pThreadStore(NULL),
     m_CodeManager(NULL),
     m_conservativeStackReportingEnabled(false),
     m_pUnboxingStubsRegion(NULL)
@@ -189,10 +187,10 @@ RuntimeInstance::RuntimeInstance() :
 
 RuntimeInstance::~RuntimeInstance()
 {
-    if (NULL != m_pThreadStore)
+    if (NULL != ThreadStore::s_pThreadStore)
     {
-        delete m_pThreadStore;
-        m_pThreadStore = NULL;
+        delete ThreadStore::s_pThreadStore;
+        ThreadStore::s_pThreadStore = NULL;
     }
 }
 
@@ -216,7 +214,7 @@ void RuntimeInstance::RegisterCodeManager(ICodeManager * pCodeManager, PTR_VOID 
     m_cbManagedCodeRange = cbRange;
 }
 
-extern "C" void __stdcall RegisterCodeManager(ICodeManager * pCodeManager, PTR_VOID pvStartRange, uint32_t cbRange)
+extern "C" void RegisterCodeManager(ICodeManager * pCodeManager, PTR_VOID pvStartRange, uint32_t cbRange)
 {
     GetRuntimeInstance()->RegisterCodeManager(pCodeManager, pvStartRange, cbRange);
 }
@@ -256,7 +254,7 @@ bool RuntimeInstance::IsUnboxingStub(uint8_t* pCode)
     return false;
 }
 
-extern "C" bool __stdcall RegisterUnboxingStubs(PTR_VOID pvStartRange, uint32_t cbRange)
+extern "C" bool RegisterUnboxingStubs(PTR_VOID pvStartRange, uint32_t cbRange)
 {
     return GetRuntimeInstance()->RegisterUnboxingStubs(pvStartRange, cbRange);
 }
@@ -268,7 +266,7 @@ bool RuntimeInstance::RegisterTypeManager(TypeManager * pTypeManager)
         return false;
 
     pEntry->m_pTypeManager = pTypeManager;
-    m_TypeManagerList.PushHeadInterlocked(pEntry);
+    m_TypeManagerList.InsertHead(pEntry);
 
     return true;
 }
@@ -290,7 +288,7 @@ FCIMPL1(void*, RhpRegisterOsModule, HANDLE hOsModule)
 
     pEntry->m_osModule = hOsModule;
     RuntimeInstance *pRuntimeInstance = GetRuntimeInstance();
-    pRuntimeInstance->GetOsModuleList()->PushHeadInterlocked(pEntry);
+    pRuntimeInstance->GetOsModuleList()->InsertHead(pEntry);
 
     return hOsModule; // Return non-null on success
 }
@@ -315,11 +313,11 @@ bool RuntimeInstance::Initialize(HANDLE hPalInstance)
     pThreadStore.SuppressRelease();
     pRuntimeInstance.SuppressRelease();
 
-    pRuntimeInstance->m_pThreadStore = pThreadStore;
     pRuntimeInstance->m_hPalInstance = hPalInstance;
 
     ASSERT_MSG(g_pTheRuntimeInstance == NULL, "multi-instances are not supported");
     g_pTheRuntimeInstance = pRuntimeInstance;
+    ThreadStore::s_pThreadStore = pThreadStore;
 
     return true;
 }
@@ -349,28 +347,14 @@ bool RuntimeInstance::ShouldHijackCallsiteForGcStress(uintptr_t CallsiteIP)
 #endif // FEATURE_GC_STRESS
 }
 
-#ifdef FEATURE_CACHED_INTERFACE_DISPATCH
-EXTERN_C void F_CALL_CONV RhpInitialDynamicInterfaceDispatch();
+EXTERN_C void* g_pDispatchCache;
+void* g_pDispatchCache;
 
-FCIMPL2(void *, RhNewInterfaceDispatchCell, MethodTable * pInterface, int32_t slotNumber)
+FCIMPL1(void, RhpRegisterDispatchCache, void* pCache)
 {
-    InterfaceDispatchCell * pCell = new (nothrow) InterfaceDispatchCell[2];
-    if (pCell == NULL)
-        return NULL;
-
-    // Due to the synchronization mechanism used to update this indirection cell we must ensure the cell's alignment is twice that of a pointer.
-    // Fortunately, Windows heap guarantees this alignment.
-    ASSERT(IS_ALIGNED(pCell, 2 * POINTER_SIZE));
-    ASSERT(IS_ALIGNED(pInterface, (InterfaceDispatchCell::IDC_CachePointerMask + 1)));
-
-    pCell[0].m_pStub = (uintptr_t)&RhpInitialDynamicInterfaceDispatch;
-    pCell[0].m_pCache = ((uintptr_t)pInterface) | InterfaceDispatchCell::IDC_CachePointerIsInterfacePointerOrMetadataToken;
-    pCell[1].m_pStub = 0;
-    pCell[1].m_pCache = (uintptr_t)slotNumber;
-
-    return pCell;
+    ASSERT(g_pDispatchCache == NULL);
+    g_pDispatchCache = pCache;
 }
 FCIMPLEND
-#endif // FEATURE_CACHED_INTERFACE_DISPATCH
 
 #endif // DACCESS_COMPILE

@@ -12,6 +12,8 @@ namespace System.Reflection.Emit
         {
         }
 
+        public override Type? GetNullableUnderlyingType() => null;
+
         public const int UnspecifiedTypeSize = 0;
 
         public PackingSize PackingSize
@@ -225,22 +227,22 @@ namespace System.Reflection.Emit
             Type[]? parameterTypes, Type[][]? parameterTypeRequiredCustomModifiers, Type[][]? parameterTypeOptionalCustomModifiers,
             CallingConvention nativeCallConv, CharSet nativeCharSet);
 
-        public PropertyBuilder DefineProperty(string name, PropertyAttributes attributes, Type returnType, Type[]? parameterTypes)
+        public PropertyBuilder DefineProperty(string name, PropertyAttributes attributes, Type? returnType, Type[]? parameterTypes)
             => DefineProperty(name, attributes, returnType, null, null, parameterTypes, null, null);
 
         public PropertyBuilder DefineProperty(string name, PropertyAttributes attributes,
-            CallingConventions callingConvention, Type returnType, Type[]? parameterTypes)
+            CallingConventions callingConvention, Type? returnType, Type[]? parameterTypes)
              => DefineProperty(name, attributes, callingConvention, returnType, null, null, parameterTypes, null, null);
 
         public PropertyBuilder DefineProperty(string name, PropertyAttributes attributes,
-            Type returnType, Type[]? returnTypeRequiredCustomModifiers, Type[]? returnTypeOptionalCustomModifiers,
+            Type? returnType, Type[]? returnTypeRequiredCustomModifiers, Type[]? returnTypeOptionalCustomModifiers,
             Type[]? parameterTypes, Type[][]? parameterTypeRequiredCustomModifiers, Type[][]? parameterTypeOptionalCustomModifiers)
                 => DefineProperty(name, attributes, default,
                     returnType, returnTypeRequiredCustomModifiers, returnTypeOptionalCustomModifiers,
                     parameterTypes, parameterTypeRequiredCustomModifiers, parameterTypeOptionalCustomModifiers);
 
         public PropertyBuilder DefineProperty(string name, PropertyAttributes attributes, CallingConventions callingConvention,
-            Type returnType, Type[]? returnTypeRequiredCustomModifiers, Type[]? returnTypeOptionalCustomModifiers,
+            Type? returnType, Type[]? returnTypeRequiredCustomModifiers, Type[]? returnTypeOptionalCustomModifiers,
             Type[]? parameterTypes, Type[][]? parameterTypeRequiredCustomModifiers, Type[][]? parameterTypeOptionalCustomModifiers)
         {
             ArgumentException.ThrowIfNullOrEmpty(name);
@@ -251,7 +253,7 @@ namespace System.Reflection.Emit
         }
 
         protected abstract PropertyBuilder DefinePropertyCore(string name, PropertyAttributes attributes, CallingConventions callingConvention,
-            Type returnType, Type[]? returnTypeRequiredCustomModifiers, Type[]? returnTypeOptionalCustomModifiers,
+            Type? returnType, Type[]? returnTypeRequiredCustomModifiers, Type[]? returnTypeOptionalCustomModifiers,
             Type[]? parameterTypes, Type[][]? parameterTypeRequiredCustomModifiers, Type[][]? parameterTypeOptionalCustomModifiers);
 
         public ConstructorBuilder DefineTypeInitializer()
@@ -319,6 +321,11 @@ namespace System.Reflection.Emit
         public override Type MakeGenericType(params Type[] typeArguments)
         {
             return TypeBuilderInstantiation.MakeGenericType(this, typeArguments);
+        }
+
+        public override Type MakeFunctionPointerType(Type[]? parameterTypes, bool isUnmanaged = false)
+        {
+            return Type.MakeFunctionPointerSignatureType(this, parameterTypes, isUnmanaged);
         }
 
         #region Public Static Methods

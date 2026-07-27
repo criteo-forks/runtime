@@ -2,13 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 
 namespace System
 {
+    [ClassInterface(ClassInterfaceType.None)]
+    [ComVisible(true)]
     public abstract partial class Delegate : ICloneable, ISerializable
     {
         public virtual object Clone() => MemberwiseClone();
@@ -64,29 +68,30 @@ namespace System
         public static Delegate CreateDelegate(Type type, object target, string method, bool ignoreCase) => CreateDelegate(type, target, method, ignoreCase, throwOnBindFailure: true)!;
 
         // V1 api: Creates open delegates to static methods only, relaxed signature checking disallowed.
-        public static Delegate CreateDelegate(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] Type target, string method) => CreateDelegate(type, target, method, ignoreCase: false, throwOnBindFailure: true)!;
-        public static Delegate CreateDelegate(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] Type target, string method, bool ignoreCase) => CreateDelegate(type, target, method, ignoreCase, throwOnBindFailure: true)!;
-
-#if !NATIVEAOT
-        protected virtual Delegate CombineImpl(Delegate? d) => throw new MulticastNotSupportedException(SR.Multicast_Combine);
-
-        protected virtual Delegate? RemoveImpl(Delegate d) => d.Equals(this) ? null : this;
-
-        public virtual Delegate[] GetInvocationList() => [this];
+        public static Delegate CreateDelegate(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.AllMethods)] Type target, string method) => CreateDelegate(type, target, method, ignoreCase: false, throwOnBindFailure: true)!;
+        public static Delegate CreateDelegate(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.AllMethods)] Type target, string method, bool ignoreCase) => CreateDelegate(type, target, method, ignoreCase, throwOnBindFailure: true)!;
 
         /// <summary>
         /// Gets a value that indicates whether the <see cref="Delegate"/> has a single invocation target.
         /// </summary>
         /// <value>true if the <see cref="Delegate"/> has a single invocation target.</value>
-        public bool HasSingleTarget => Unsafe.As<MulticastDelegate>(this).HasSingleTarget;
-#endif
+        public partial bool HasSingleTarget { get; }
+
+        internal object GetTargetForSingleCastInstanceDelegate()
+        {
+            Debug.Assert(HasSingleTarget && Target == _target && _target != null);
+            return _target;
+        }
 
         /// <summary>
         /// Gets an enumerator for the invocation targets of this delegate.
         /// </summary>
+        /// <typeparam name="TDelegate">Delegate type being enumerated.</typeparam>
+        /// <param name="d">The delegate being enumerated.</param>
+        /// <returns>A <see cref="InvocationListEnumerator{TDelegate}" /> that follows the IEnumerable pattern and
+        /// thus can be used in a C# 'foreach' statement to retrieve the invocation targets of this delegate without allocations.
+        /// The method returns an empty enumerator for <see langword="null" /> delegate.</returns>
         /// <remarks>
-        /// This returns a <see cref="InvocationListEnumerator{TDelegate}"/>" /> that follows the IEnumerable pattern and
-        /// thus can be used in a C# 'foreach' statements to retrieve the invocation targets of this delegate without allocations.
         /// The order of the delegates returned by the enumerator is the same order in which the current delegate invokes the methods that those delegates represent.
         /// The method returns an empty enumerator for null delegate.
         /// </remarks>
@@ -120,6 +125,8 @@ namespace System
             /// <summary>
             /// Implements the IEnumerator pattern.
             /// </summary>
+            /// <returns><see langword="true" /> if the enumerator was successfully advanced to the next element;
+            /// otherwise, <see langword="false" /> if the enumerator has passed the end of the collection. </returns>
             public bool MoveNext()
             {
                 int index = _index + 1;
@@ -132,8 +139,9 @@ namespace System
             }
 
             /// <summary>
-            /// Implement IEnumerable.GetEnumerator() to return  'this' as the IEnumerator
+            /// Implement IEnumerable.GetEnumerator() to return 'this' as the IEnumerator.
             /// </summary>
+            /// <returns>An IEnumerator instance that can be used to iterate through the invocation targets of the delegate.</returns>
             [EditorBrowsable(EditorBrowsableState.Never)] // Only here to make foreach work
             public System.Delegate.InvocationListEnumerator<TDelegate> GetEnumerator() => this;
         }
@@ -145,7 +153,7 @@ namespace System
 
         [Obsolete(Obsoletions.LegacyFormatterImplMessage, DiagnosticId = Obsoletions.LegacyFormatterImplDiagId, UrlFormat = Obsoletions.SharedUrlFormat)]
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public virtual void GetObjectData(SerializationInfo info, StreamingContext context) => throw new PlatformNotSupportedException();
+        public virtual void GetObjectData(SerializationInfo info, StreamingContext context) => throw new SerializationException(SR.Serialization_DelegatesNotSupported);
 
         public MethodInfo Method => GetMethodImpl();
 
@@ -187,7 +195,7 @@ namespace System
                 return d1 is null;
             }
 
-            return ReferenceEquals(d2, d1) ? true : d2.Equals((object?)d1);
+            return ReferenceEquals(d2, d1) || d2.Equals(d1);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -200,7 +208,7 @@ namespace System
                 return d1 is not null;
             }
 
-            return ReferenceEquals(d2, d1) ? false : !d2.Equals(d1);
+            return !ReferenceEquals(d2, d1) && !d2.Equals(d1);
         }
     }
 }

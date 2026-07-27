@@ -8,6 +8,7 @@
 
 
 #include "common.h"
+#include <limits>
 
 #include "stubgen.h"
 #include "jitinterface.h"
@@ -148,7 +149,7 @@ void ILStubLinker::DumpIL_FormatToken(mdToken token, SString &strTokenFormatting
     {
         strTokenFormatting.Printf("%d", token);
     }
-    EX_END_CATCH(SwallowAllExceptions)
+    EX_END_CATCH
 }
 
 void ILCodeStream::Emit(ILInstrEnum instr, INT16 iStackDelta, UINT_PTR uArg)
@@ -173,6 +174,22 @@ void ILCodeStream::Emit(ILInstrEnum instr, INT16 iStackDelta, UINT_PTR uArg)
     pInstrBuffer[idxCurInstr].uInstruction = static_cast<UINT16>(instr);
     pInstrBuffer[idxCurInstr].iStackDelta = iStackDelta;
     pInstrBuffer[idxCurInstr].uArg = uArg;
+
+    if(m_pOwner->m_pBuildingEHClauseStack != NULL)
+    {
+        ILStubEHClauseBuilder& clause = *m_pOwner->m_pBuildingEHClauseStack;
+
+        if (clause.tryBeginLabel != NULL && clause.tryEndLabel != NULL &&
+             clause.handlerBeginLabel != NULL && clause.kind == ILStubEHClause::kTypedCatch)
+        {
+            if (clause.handlerBeginLabel->m_pCodeStreamOfLabel == this &&
+                clause.handlerBeginLabel->m_idxLabeledInstruction == idxCurInstr)
+            {
+                // Catch clauses start with an exception on the stack
+                pInstrBuffer[idxCurInstr].iStackDelta++;
+            }
+        }
+    }
 }
 
 ILCodeLabel* ILStubLinker::NewCodeLabel()
@@ -342,9 +359,9 @@ lShortForm:
             if (FitsInI1(uConst))
             {
                 static const UINT_PTR c_uMakeShortDelta = ((UINT_PTR)CEE_LDARG - (UINT_PTR)CEE_LDARG_S);
-                static_assert_no_msg(((UINT_PTR)CEE_LDARG - c_uMakeShortDelta) == (UINT_PTR)CEE_LDARG_S);
-                static_assert_no_msg(((UINT_PTR)CEE_LDLOC - c_uMakeShortDelta) == (UINT_PTR)CEE_LDLOC_S);
-                static_assert_no_msg(((UINT_PTR)CEE_STLOC - c_uMakeShortDelta) == (UINT_PTR)CEE_STLOC_S);
+                static_assert(((UINT_PTR)CEE_LDARG - c_uMakeShortDelta) == (UINT_PTR)CEE_LDARG_S);
+                static_assert(((UINT_PTR)CEE_LDLOC - c_uMakeShortDelta) == (UINT_PTR)CEE_LDLOC_S);
+                static_assert(((UINT_PTR)CEE_STLOC - c_uMakeShortDelta) == (UINT_PTR)CEE_STLOC_S);
 
                 instr = (ILInstrEnum)((UINT_PTR)instr - c_uMakeShortDelta);
             }
@@ -358,9 +375,9 @@ lShortForm:
             if (FitsInI1(uConst))
             {
                 static const UINT_PTR c_uMakeShortDelta = ((UINT_PTR)CEE_LDARGA - (UINT_PTR)CEE_LDARGA_S);
-                static_assert_no_msg(((UINT_PTR)CEE_LDARGA - c_uMakeShortDelta) == (UINT_PTR)CEE_LDARGA_S);
-                static_assert_no_msg(((UINT_PTR)CEE_STARG  - c_uMakeShortDelta) == (UINT_PTR)CEE_STARG_S);
-                static_assert_no_msg(((UINT_PTR)CEE_LDLOCA - c_uMakeShortDelta) == (UINT_PTR)CEE_LDLOCA_S);
+                static_assert(((UINT_PTR)CEE_LDARGA - c_uMakeShortDelta) == (UINT_PTR)CEE_LDARGA_S);
+                static_assert(((UINT_PTR)CEE_STARG  - c_uMakeShortDelta) == (UINT_PTR)CEE_STARG_S);
+                static_assert(((UINT_PTR)CEE_LDLOCA - c_uMakeShortDelta) == (UINT_PTR)CEE_LDLOCA_S);
 
                 instr = (ILInstrEnum)((UINT_PTR)instr - c_uMakeShortDelta);
             }
@@ -595,7 +612,7 @@ ILStubLinker::LogILStubWorker(
         //
         // calculate the code size
         //
-        PREFIX_ASSUME((size_t)instr < sizeof(s_rgbOpcodeSizes));
+        _ASSERTE((size_t)instr < sizeof(s_rgbOpcodeSizes));
         *pcbCode += s_rgbOpcodeSizes[instr];
 
         //
@@ -718,7 +735,7 @@ bool ILStubLinker::FirstPassLink(ILInstruction* pInstrBuffer, UINT numInstr, siz
         //
         // calculate the code size
         //
-        PREFIX_ASSUME((size_t)instr < sizeof(s_rgbOpcodeSizes));
+        _ASSERTE((size_t)instr < sizeof(s_rgbOpcodeSizes));
         *pcbCode += s_rgbOpcodeSizes[instr];
 
         //
@@ -787,10 +804,10 @@ size_t ILStubLinker::Link(UINT* puMaxStack)
     UINT            uMaxStack = 0;
     DEBUG_STMT(bool fStackUnderflow = false);
 
+    _ASSERTE(m_pBuildingEHClauseStack == NULL);
+
     while (pCurrentStream)
     {
-        _ASSERTE(pCurrentStream->m_buildingEHClauses.GetCount() == 0);
-
         if (pCurrentStream->m_pqbILInstructions)
         {
             ILInstruction* pInstrBuffer = (ILInstruction*)pCurrentStream->m_pqbILInstructions->Ptr();
@@ -832,52 +849,69 @@ size_t ILStubLinker::Link(UINT* puMaxStack)
 
 size_t ILStubLinker::GetNumEHClauses()
 {
-    size_t result = 0;
-    for (ILCodeStream* stream = m_pCodeStreamList; stream; stream = stream->m_pNextStream)
+    size_t count = 0;
+    for (ILStubEHClauseBuilder* pCurrent = m_pFinishedEHClauseHead; pCurrent != NULL; pCurrent = pCurrent->next)
     {
-        result += stream->m_finishedEHClauses.GetCount();
+        count++;
     }
-
-    return result;
+    return count;
 }
 
 void ILStubLinker::WriteEHClauses(COR_ILMETHOD_SECT_EH* pSect)
 {
-    unsigned int clauseIndex = 0;
-    for (ILCodeStream* stream = m_pCodeStreamList; stream; stream = stream->m_pNextStream)
+    COUNT_T i = 0;
+    for (ILStubEHClauseBuilder* pCurrent = m_pFinishedEHClauseHead; pCurrent != NULL; pCurrent = pCurrent->next, i++)
     {
-        const SArray<ILStubEHClauseBuilder>& clauses = stream->m_finishedEHClauses;
-        for (COUNT_T i = 0; i < clauses.GetCount(); i++)
+        const ILStubEHClauseBuilder& builder = *pCurrent;
+
+        CorExceptionFlag flags;
+        switch (builder.kind)
         {
-            const ILStubEHClauseBuilder& builder = clauses[i];
-
-            CorExceptionFlag flags;
-            switch (builder.kind)
-            {
-            case ILStubEHClause::kTypedCatch: flags = COR_ILEXCEPTION_CLAUSE_NONE; break;
-            case ILStubEHClause::kFinally: flags = COR_ILEXCEPTION_CLAUSE_FINALLY; break;
-            default: UNREACHABLE_MSG("unexpected EH clause kind");
-            }
-
-            size_t tryBegin = builder.tryBeginLabel->GetCodeOffset();
-            size_t tryEnd = builder.tryEndLabel->GetCodeOffset();
-            size_t handlerBegin = builder.handlerBeginLabel->GetCodeOffset();
-            size_t handlerEnd = builder.handlerEndLabel->GetCodeOffset();
-
-            IMAGE_COR_ILMETHOD_SECT_EH_CLAUSE_FAT& clause = pSect->Fat.Clauses[clauseIndex];
-            clause.Flags = flags;
-            clause.TryOffset = static_cast<DWORD>(tryBegin);
-            clause.TryLength = static_cast<DWORD>(tryEnd - tryBegin);
-            clause.HandlerOffset = static_cast<DWORD>(handlerBegin);
-            clause.HandlerLength = static_cast<DWORD>(handlerEnd - handlerBegin);
-            clause.ClassToken = builder.typeToken;
-
-            clauseIndex++;
+        case ILStubEHClause::kTypedCatch: flags = COR_ILEXCEPTION_CLAUSE_NONE; break;
+        case ILStubEHClause::kFinally: flags = COR_ILEXCEPTION_CLAUSE_FINALLY; break;
+        default: UNREACHABLE_MSG("unexpected EH clause kind");
         }
+
+        size_t tryBegin = builder.tryBeginLabel->GetCodeOffset();
+        size_t tryEnd = builder.tryEndLabel->GetCodeOffset();
+        size_t handlerBegin = builder.handlerBeginLabel->GetCodeOffset();
+        size_t handlerEnd = builder.handlerEndLabel->GetCodeOffset();
+
+        IMAGE_COR_ILMETHOD_SECT_EH_CLAUSE_FAT& clause = pSect->Fat.Clauses[i];
+        clause.Flags = flags;
+        clause.TryOffset = static_cast<DWORD>(tryBegin);
+        clause.TryLength = static_cast<DWORD>(tryEnd - tryBegin);
+        clause.HandlerOffset = static_cast<DWORD>(handlerBegin);
+        clause.HandlerLength = static_cast<DWORD>(handlerEnd - handlerBegin);
+        clause.ClassToken = builder.typeToken;
     }
 
     pSect->Fat.Kind = CorILMethod_Sect_EHTable | CorILMethod_Sect_FatFormat;
-    pSect->Fat.DataSize = COR_ILMETHOD_SECT_EH_FAT::Size(clauseIndex);
+    pSect->Fat.DataSize = COR_ILMETHOD_SECT_EH_FAT::Size(i);
+}
+
+ILStubEHClause ILStubLinker::GetEHClause(size_t index)
+{
+    ILStubEHClauseBuilder* pCurrent = m_pFinishedEHClauseHead;
+    for (size_t i = 0; i < index; i++)
+    {
+        _ASSERTE(pCurrent != NULL);
+        pCurrent = pCurrent->next;
+    }
+    _ASSERTE(pCurrent != NULL);
+    const ILStubEHClauseBuilder& builder = *pCurrent;
+
+    ILStubEHClause clause{};
+    clause.kind = builder.kind;
+    clause.dwTryBeginOffset = static_cast<DWORD>(builder.tryBeginLabel->GetCodeOffset());
+    DWORD tryEnd = static_cast<DWORD>(builder.tryEndLabel->GetCodeOffset());
+    clause.cbTryLength = tryEnd - clause.dwTryBeginOffset;
+    clause.dwHandlerBeginOffset = static_cast<DWORD>(builder.handlerBeginLabel->GetCodeOffset());
+    DWORD handlerEnd = static_cast<DWORD>(builder.handlerEndLabel->GetCodeOffset());
+    clause.cbHandlerLength = handlerEnd - clause.dwHandlerBeginOffset;
+    clause.dwTypeToken = builder.typeToken;
+
+    return clause;
 }
 
 #ifdef _DEBUG
@@ -916,7 +950,7 @@ BYTE* ILStubLinker::GenerateCodeWorker(BYTE* pbBuffer, ILInstruction* pInstrBuff
         {
             const ILOpcode* pOpcode = &s_rgOpcodes[instr];
 
-            PREFIX_ASSUME((size_t)instr < sizeof(s_rgbOpcodeSizes));
+            _ASSERTE((size_t)instr < sizeof(s_rgbOpcodeSizes));
             int     opSize = s_rgbOpcodeSizes[instr];
             bool    twoByteOp = (pOpcode->byte1 != 0xFF);
             int     argSize = opSize - (twoByteOp ? 2 : 1);
@@ -948,10 +982,18 @@ BYTE* ILStubLinker::GenerateCodeWorker(BYTE* pbBuffer, ILInstruction* pInstrBuff
                 case 8:
                     {
                         UINT64 uVal = pInstrBuffer[i].uArg;
-#ifndef TARGET_64BIT  // We don't have room on 32-bit platforms to store the CLR_NAN_64 value, so
-                // we use a special value to represent CLR_NAN_64 and then recreate it here.
+#ifndef TARGET_64BIT  // We don't have room on 32-bit platforms to store the 64-bit NaN value, so
+                // we use a special value to represent NaN and then recreate it here.
                         if ((instr == ILCodeStream::CEE_LDC_R8) && (((UINT32)uVal) == ILCodeStream::SPECIAL_VALUE_NAN_64_ON_32))
-                            uVal = CLR_NAN_64;
+                        {
+                            union
+                            {
+                                UINT64 u;
+                                double d;
+                            } value;
+                            value.d = -std::numeric_limits<double>::quiet_NaN();
+                            uVal = value.u;
+                        }
 #endif // TARGET_64BIT
                         SET_UNALIGNED_VAL64(pbBuffer, uVal);
                     }
@@ -1034,6 +1076,8 @@ LPCSTR ILCodeStream::GetStreamDescription(ILStubLinker::CodeStreamType streamTyp
         "ExceptionCleanup",
         "Cleanup",
         "ExceptionHandler",
+        "TypeCheckAndCallMethod",
+        "UpdateByRefsAndReturn"
     };
 
 #ifdef _DEBUG
@@ -1046,17 +1090,23 @@ LPCSTR ILCodeStream::GetStreamDescription(ILStubLinker::CodeStreamType streamTyp
 
 void ILCodeStream::BeginTryBlock()
 {
-    ILStubEHClauseBuilder& clause = *m_buildingEHClauses.Append();
-    memset(&clause, 0, sizeof(ILStubEHClauseBuilder));
-    clause.kind = ILStubEHClause::kNone;
-    clause.tryBeginLabel = NewCodeLabel();
-    EmitLabel(clause.tryBeginLabel);
+    ILStubEHClauseBuilder* pClause = new ILStubEHClauseBuilder();
+    pClause->kind = ILStubEHClause::kNone;
+    pClause->tryBeginLabel = NULL;
+    pClause->tryEndLabel = NULL;
+    pClause->handlerBeginLabel = NULL;
+    pClause->handlerEndLabel = NULL;
+    pClause->typeToken = 0;
+    pClause->next = m_pOwner->m_pBuildingEHClauseStack;
+    m_pOwner->m_pBuildingEHClauseStack = pClause;
+    pClause->tryBeginLabel = NewCodeLabel();
+    EmitLabel(pClause->tryBeginLabel);
 }
 
 void ILCodeStream::EndTryBlock()
 {
-    _ASSERTE(m_buildingEHClauses.GetCount() > 0);
-    ILStubEHClauseBuilder& clause = m_buildingEHClauses[m_buildingEHClauses.GetCount() - 1];
+    _ASSERTE(m_pOwner->m_pBuildingEHClauseStack != NULL);
+    ILStubEHClauseBuilder& clause = *m_pOwner->m_pBuildingEHClauseStack;
 
     _ASSERTE(clause.tryBeginLabel != NULL && clause.tryEndLabel == NULL);
     clause.tryEndLabel = NewCodeLabel();
@@ -1065,10 +1115,13 @@ void ILCodeStream::EndTryBlock()
 
 void ILCodeStream::BeginHandler(DWORD kind, DWORD typeToken)
 {
-    _ASSERTE(m_buildingEHClauses.GetCount() > 0);
-    ILStubEHClauseBuilder& clause = m_buildingEHClauses[m_buildingEHClauses.GetCount() - 1];
+    _ASSERTE(m_pOwner->m_pBuildingEHClauseStack != NULL);
+    ILStubEHClauseBuilder& clause = *m_pOwner->m_pBuildingEHClauseStack;
 
-    _ASSERTE(clause.tryBeginLabel != NULL && clause.tryEndLabel != NULL &&
+    // tryEndLabel may not be set yet when the handler begins on a different
+    // code stream than the try body (e.g. PInvoke cleanup finally).
+    // It must be set before the handler ends.
+    _ASSERTE(clause.tryBeginLabel != NULL &&
              clause.handlerBeginLabel == NULL && clause.kind == ILStubEHClause::kNone);
 
     clause.kind = kind;
@@ -1079,8 +1132,9 @@ void ILCodeStream::BeginHandler(DWORD kind, DWORD typeToken)
 
 void ILCodeStream::EndHandler(DWORD kind)
 {
-    _ASSERTE(m_buildingEHClauses.GetCount() > 0);
-    ILStubEHClauseBuilder& clause = m_buildingEHClauses[m_buildingEHClauses.GetCount() - 1];
+    _ASSERTE(m_pOwner->m_pBuildingEHClauseStack != NULL);
+    ILStubEHClauseBuilder* pClause = m_pOwner->m_pBuildingEHClauseStack;
+    ILStubEHClauseBuilder& clause = *pClause;
 
     _ASSERTE(clause.tryBeginLabel != NULL && clause.tryEndLabel != NULL &&
              clause.handlerBeginLabel != NULL && clause.handlerEndLabel == NULL &&
@@ -1089,8 +1143,18 @@ void ILCodeStream::EndHandler(DWORD kind)
     clause.handlerEndLabel = NewCodeLabel();
     EmitLabel(clause.handlerEndLabel);
 
-    m_finishedEHClauses.Append(clause);
-    m_buildingEHClauses.SetCount(m_buildingEHClauses.GetCount() - 1);
+    // Move from building stack to finished list
+    m_pOwner->m_pBuildingEHClauseStack = pClause->next;
+    pClause->next = NULL;
+    if (m_pOwner->m_pFinishedEHClauseTail != NULL)
+    {
+        m_pOwner->m_pFinishedEHClauseTail->next = pClause;
+    }
+    else
+    {
+        m_pOwner->m_pFinishedEHClauseHead = pClause;
+    }
+    m_pOwner->m_pFinishedEHClauseTail = pClause;
 }
 
 void ILCodeStream::BeginCatchBlock(int token)
@@ -1176,6 +1240,11 @@ void ILCodeStream::EmitBNE_UN(ILCodeLabel* pCodeLabel)
 {
     WRAPPER_NO_CONTRACT;
     Emit(CEE_BNE_UN, -2, (UINT_PTR)pCodeLabel);
+}
+void ILCodeStream::EmitBOX(int token)
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_BOX, 0, token);
 }
 void ILCodeStream::EmitBR(ILCodeLabel* pCodeLabel)
 {
@@ -1419,23 +1488,43 @@ void ILCodeStream::EmitLDC(DWORD_PTR uConst)
 #endif
         , 1, uConst);
 }
-void ILCodeStream::EmitLDC_R4(UINT32 uConst)
+void ILCodeStream::EmitLDC_R4(float fConst)
 {
     WRAPPER_NO_CONTRACT;
-    Emit(CEE_LDC_R4, 1, uConst);
+
+    union
+    {
+        float f;
+        uint32_t u;
+    } value;
+
+    value.f = fConst;
+
+    Emit(CEE_LDC_R4, 1, value.u);
 }
-void ILCodeStream::EmitLDC_R8(UINT64 uConst)
+void ILCodeStream::EmitLDC_R8(double dConst)
 {
     STANDARD_VM_CONTRACT;
-#ifndef TARGET_64BIT  // We don't have room on 32-bit platforms to stor the CLR_NAN_64 value, so
-                // we use a special value to represent CLR_NAN_64 and then recreate it later.
-    CONSISTENCY_CHECK(((UINT32)uConst) != SPECIAL_VALUE_NAN_64_ON_32);
-    if (uConst == CLR_NAN_64)
-        uConst = SPECIAL_VALUE_NAN_64_ON_32;
+
+    union
+    {
+        double d;
+        UINT64 u;
+    } value;
+
+    value.d = dConst;
+#ifndef TARGET_64BIT
+    // We don't have room on 32-bit platforms to store a full 64-bit NaN value,
+    // so we use a special value to represent it and then check for it here and recreate the NaN if we see it.
+    if (std::isnan(dConst))
+        value.u = SPECIAL_VALUE_NAN_64_ON_32;
     else
-        CONSISTENCY_CHECK(FitsInU4(uConst));
+    {
+        value.d = dConst;
+        CONSISTENCY_CHECK(FitsInU4(value.u));
+    }
 #endif // TARGET_64BIT
-    Emit(CEE_LDC_R8, 1, (UINT_PTR)uConst);
+    Emit(CEE_LDC_R8, 1, (UINT_PTR)value.u);
 }
 void ILCodeStream::EmitLDELEMA(int token)
 {
@@ -1614,6 +1703,11 @@ void ILCodeStream::EmitLDSFLDA(int token)
     WRAPPER_NO_CONTRACT;
     Emit(CEE_LDSFLDA, 1, token);
 }
+void ILCodeStream::EmitLDSTR(SString str)
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_LDSTR, 1, m_pOwner->GetUserStringToken(std::move(str)));
+}
 void ILCodeStream::EmitLDTOKEN(int token)
 {
     WRAPPER_NO_CONTRACT;
@@ -1644,6 +1738,11 @@ void ILCodeStream::EmitNEWOBJ(int token, int numInArgs)
     WRAPPER_NO_CONTRACT;
     Emit(CEE_NEWOBJ, (INT16)(1 - numInArgs), token);
 }
+void ILCodeStream::EmitNEWARR(int token)
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_NEWARR, 0, token);
+}
 
 void ILCodeStream::EmitNOP(LPCSTR pszNopComment)
 {
@@ -1671,6 +1770,16 @@ void ILCodeStream::EmitSTARG(unsigned uArgIdx)
 {
     WRAPPER_NO_CONTRACT;
     Emit(CEE_STARG, -1, uArgIdx);
+}
+void ILCodeStream::EmitSTELEM_I1()
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_STELEM_I1, -3, 0);
+}
+void ILCodeStream::EmitSTELEM_I4()
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_STELEM_I4, -3, 0);
 }
 void ILCodeStream::EmitSTELEM_REF()
 {
@@ -1812,6 +1921,17 @@ void ILCodeStream::EmitUNALIGNED(BYTE alignment)
     Emit(CEE_UNALIGNED, 0, alignment);
 }
 
+void ILCodeStream::EmitUNBOX(int token)
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_UNBOX, 0, token);
+}
+
+void ILCodeStream::EmitUNBOX_ANY(int token)
+{
+    WRAPPER_NO_CONTRACT;
+    Emit(CEE_UNBOX_ANY, 0, token);
+}
 
 void ILCodeStream::EmitNEWOBJ(BinderMethodID id, int numInArgs)
 {
@@ -1868,32 +1988,6 @@ void ILCodeStream::EmitLoadNullPtr()
     EmitCONV_I();
 }
 
-void ILCodeStream::EmitArgIteratorCreateAndLoad()
-{
-    STANDARD_VM_CONTRACT;
-
-    //
-    // we insert the ArgIterator in the same spot that the VASigCookie will go for sanity
-    //
-    LocalDesc   aiLoc(CoreLibBinder::GetClass(CLASS__ARG_ITERATOR));
-    int         aiLocNum;
-
-    aiLocNum = NewLocal(aiLoc);
-
-    EmitLDLOCA(aiLocNum);
-    EmitDUP();
-    EmitARGLIST();
-    EmitLoadNullPtr();
-    EmitCALL(METHOD__ARG_ITERATOR__CTOR2, 2, 0);
-
-    aiLoc.ElementType[0]    = ELEMENT_TYPE_BYREF;
-    aiLoc.ElementType[1]    = ELEMENT_TYPE_INTERNAL;
-    aiLoc.cbType            = 2;
-    aiLoc.InternalToken     = CoreLibBinder::GetClass(CLASS__ARG_ITERATOR);
-
-    SetStubTargetArgType(&aiLoc, false);
-}
-
 DWORD ILStubLinker::NewLocal(CorElementType typ)
 {
     CONTRACTL
@@ -1921,9 +2015,13 @@ void StubSigBuilder::EnsureEnoughQuickBytes(size_t cbToAppend)
     STANDARD_VM_CONTRACT;
 
     SIZE_T cbBuffer = m_qbSigBuffer.Size();
-    if ((m_cbSig + cbToAppend) >= cbBuffer)
+    if ((cbBuffer - m_cbSig) < cbToAppend)
     {
-        m_qbSigBuffer.ReSizeThrows(2 * cbBuffer);
+        SIZE_T cbNew = max((SIZE_T)(m_cbSig + cbToAppend), 2 * cbBuffer);
+        // Detect integer overflow
+        if ((cbNew - m_cbSig) < cbToAppend)
+            COMPlusThrowHR(COR_E_OVERFLOW);
+        m_qbSigBuffer.ReSizeThrows(cbNew);
         m_pbSigCursor = ((BYTE*)m_qbSigBuffer.Ptr()) + m_cbSig;
     }
 }
@@ -1938,7 +2036,13 @@ DWORD StubSigBuilder::Append(LocalDesc* pLoc)
     }
     CONTRACTL_END;
 
-    EnsureEnoughQuickBytes(pLoc->cbType + sizeof(TypeHandle));
+    // Ensure we have enough bytes for the provided signature,
+    // the handle for ELEMENT_TYPE_INTERNAL,
+    // and the byte and handle for ELEMENT_TYPE_CMOD_INTERNAL
+    const size_t InternalPayloadSize = sizeof(TypeHandle);
+    const size_t CModInternalPayloadSize = sizeof(BYTE) + sizeof(TypeHandle);
+    EnsureEnoughQuickBytes(pLoc->cbType + InternalPayloadSize + CModInternalPayloadSize);
+    BYTE* pbSigStart = m_pbSigCursor;
 
     memcpyNoGCRefs(m_pbSigCursor, pLoc->ElementType, pLoc->cbType);
     m_pbSigCursor   += pLoc->cbType;
@@ -1958,6 +2062,23 @@ DWORD StubSigBuilder::Append(LocalDesc* pLoc)
                 m_pbSigCursor   += sizeof(TypeHandle);
                 m_cbSig         += sizeof(TypeHandle);
                 break;
+
+            case ELEMENT_TYPE_CMOD_INTERNAL:
+            {
+                // Nove later elements in the signature to make room for the CMOD_INTERNAL payload
+                memmove(pbSigStart + i + 1 + CModInternalPayloadSize, pbSigStart + i + 1, pLoc->cbType - i - 1);
+                _ASSERTE(pbSigStart[i] == ELEMENT_TYPE_CMOD_INTERNAL);
+                BYTE* pbSigInternalPayload = pbSigStart + i + 1;
+
+                // Write the "required" byte
+                *pbSigInternalPayload++ = pLoc->InternalModifierRequired ? 1 : 0;
+
+                // Write the modifier
+                SET_UNALIGNED_PTR(pbSigInternalPayload, (UINT_PTR)pLoc->InternalModifierToken.AsPtr());
+                m_pbSigCursor   += CModInternalPayloadSize;
+                m_cbSig         += CModInternalPayloadSize;
+                break;
+            }
 
             case ELEMENT_TYPE_FNPTR:
                 {
@@ -2083,8 +2204,26 @@ void FunctionSigBuilder::SetReturnType(LocalDesc* pLoc)
         {
             case ELEMENT_TYPE_INTERNAL:
                 m_qbReturnSig.ReSizeThrows(m_qbReturnSig.Size() + sizeof(TypeHandle));
-                SET_UNALIGNED_PTR((BYTE *)m_qbReturnSig.Ptr() + m_qbReturnSig.Size() - + sizeof(TypeHandle), (UINT_PTR)pLoc->InternalToken.AsPtr());
+                SET_UNALIGNED_PTR((BYTE *)m_qbReturnSig.Ptr() + m_qbReturnSig.Size() - sizeof(TypeHandle), (UINT_PTR)pLoc->InternalToken.AsPtr());
                 break;
+
+            case ELEMENT_TYPE_CMOD_INTERNAL:
+                {
+                    // Nove later elements in the signature to make room for the CMOD_INTERNAL payload
+                    const size_t CModInternalPayloadSize = sizeof(BYTE) + sizeof(TypeHandle);
+                    m_qbReturnSig.ReSizeThrows(m_qbReturnSig.Size() + CModInternalPayloadSize);
+                    BYTE* pbSigStart = (BYTE*)m_qbReturnSig.Ptr();
+                    memmove(pbSigStart + i + 1 + CModInternalPayloadSize, pbSigStart + i + 1, pLoc->cbType - i);
+                    _ASSERTE(pbSigStart[i] == ELEMENT_TYPE_CMOD_INTERNAL);
+                    BYTE* pbSigInternalPayload = pbSigStart + i + 1;
+
+                    // Write the "required" byte
+                    *pbSigInternalPayload++ = pLoc->InternalModifierRequired ? 1 : 0;
+
+                    // Write the modifier
+                    SET_UNALIGNED_PTR(pbSigInternalPayload, (UINT_PTR)pLoc->InternalModifierToken.AsPtr());
+                    break;
+                }
 
             case ELEMENT_TYPE_FNPTR:
                 {
@@ -2367,7 +2506,10 @@ ILStubLinker::ILStubLinker(Module* pStubSigModule, const Signature &signature, S
     m_cbCurrentCompressedSigLen(1),
     m_nLocals(0),
     m_fHasThis(false),
-    m_pMD(pMD)
+    m_pMD(pMD),
+    m_pBuildingEHClauseStack(NULL),
+    m_pFinishedEHClauseHead(NULL),
+    m_pFinishedEHClauseTail(NULL)
 {
     CONTRACTL
     {
@@ -2443,7 +2585,7 @@ ILStubLinker::ILStubLinker(Module* pStubSigModule, const Signature &signature, S
 
         if ((flags & (ILSTUB_LINKER_FLAG_TARGET_HAS_THIS | ILSTUB_LINKER_FLAG_NDIRECT)) == ILSTUB_LINKER_FLAG_TARGET_HAS_THIS)
         {
-            // ndirect native sig never has a 'this' pointer
+            // PInvoke native sig never has a 'this' pointer
             uNativeCallingConv |= IMAGE_CEE_CS_CALLCONV_HASTHIS;
         }
 
@@ -2507,6 +2649,7 @@ ILStubLinker::~ILStubLinker()
     CONTRACTL_END;
     DeleteCodeLabels();
     DeleteCodeStreams();
+    DeleteEHClauses();
 }
 
 void ILStubLinker::DeleteCodeLabels()
@@ -2550,6 +2693,36 @@ void ILStubLinker::DeleteCodeStreams()
         delete pDeleteMe;
     }
     m_pCodeStreamList = NULL;
+}
+
+void ILStubLinker::DeleteEHClauses()
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        MODE_ANY;
+        GC_TRIGGERS;
+    }
+    CONTRACTL_END;
+
+    ILStubEHClauseBuilder* pCurrent = m_pBuildingEHClauseStack;
+    while (pCurrent)
+    {
+        ILStubEHClauseBuilder* pDeleteMe = pCurrent;
+        pCurrent = pCurrent->next;
+        delete pDeleteMe;
+    }
+    m_pBuildingEHClauseStack = NULL;
+
+    pCurrent = m_pFinishedEHClauseHead;
+    while (pCurrent)
+    {
+        ILStubEHClauseBuilder* pDeleteMe = pCurrent;
+        pCurrent = pCurrent->next;
+        delete pDeleteMe;
+    }
+    m_pFinishedEHClauseHead = NULL;
+    m_pFinishedEHClauseTail = NULL;
 }
 
 void ILStubLinker::ClearCodeStreams()
@@ -2606,71 +2779,92 @@ void ILStubLinker::TransformArgForJIT(LocalDesc *pLoc)
     STANDARD_VM_CONTRACT;
     // Turn everything into blittable primitives. The reason this method is needed are
     // byrefs which are OK only when they ref stack data or are pinned. This condition
-    // cannot be verified by code:NDirect.MarshalingRequired so we explicitly get rid
+    // cannot be verified by code:PInvoke.MarshalingRequired so we explicitly get rid
     // of them here.
-    switch (pLoc->ElementType[0])
+    bool again;
+    BYTE* elementType = pLoc->ElementType;
+    do
     {
-        // primitives
-        case ELEMENT_TYPE_VOID:
-        case ELEMENT_TYPE_BOOLEAN:
-        case ELEMENT_TYPE_CHAR:
-        case ELEMENT_TYPE_I1:
-        case ELEMENT_TYPE_U1:
-        case ELEMENT_TYPE_I2:
-        case ELEMENT_TYPE_U2:
-        case ELEMENT_TYPE_I4:
-        case ELEMENT_TYPE_U4:
-        case ELEMENT_TYPE_I8:
-        case ELEMENT_TYPE_U8:
-        case ELEMENT_TYPE_R4:
-        case ELEMENT_TYPE_R8:
-        case ELEMENT_TYPE_I:
-        case ELEMENT_TYPE_U:
+        again = false;
+        switch (*elementType)
         {
-            // no transformation needed
-            break;
-        }
-
-        case ELEMENT_TYPE_VALUETYPE:
-        {
-            _ASSERTE(!"Should have been replaced by a native value type!");
-            break;
-        }
-
-        case ELEMENT_TYPE_PTR:
-        {
-            // Don't transform pointer types to ELEMENT_TYPE_I. The JIT can handle the correct type information,
-            // and it's required for some cases (such as SwiftError*).
-            break;
-        }
-
-        case ELEMENT_TYPE_BYREF:
-        {
-            // Transform ELEMENT_TYPE_BYREF to ELEMENT_TYPE_PTR to retain the pointed-to type information
-            // while making the type blittable.
-            pLoc->ElementType[0] = ELEMENT_TYPE_PTR;
-            break;
-        }
-
-        case ELEMENT_TYPE_INTERNAL:
-        {
-            // JIT will handle structures
-            if (pLoc->InternalToken.IsValueType())
+            // primitives
+            case ELEMENT_TYPE_VOID:
+            case ELEMENT_TYPE_BOOLEAN:
+            case ELEMENT_TYPE_CHAR:
+            case ELEMENT_TYPE_I1:
+            case ELEMENT_TYPE_U1:
+            case ELEMENT_TYPE_I2:
+            case ELEMENT_TYPE_U2:
+            case ELEMENT_TYPE_I4:
+            case ELEMENT_TYPE_U4:
+            case ELEMENT_TYPE_I8:
+            case ELEMENT_TYPE_U8:
+            case ELEMENT_TYPE_R4:
+            case ELEMENT_TYPE_R8:
+            case ELEMENT_TYPE_I:
+            case ELEMENT_TYPE_U:
             {
-                _ASSERTE(pLoc->InternalToken.IsNativeValueType() || !pLoc->InternalToken.GetMethodTable()->ContainsGCPointers());
+                // no transformation needed
                 break;
             }
-            FALLTHROUGH;
-        }
 
-        // ref types -> ELEMENT_TYPE_I
-        default:
-        {
-            pLoc->ElementType[0] = ELEMENT_TYPE_I;
-            pLoc->cbType = 1;
-            break;
+            case ELEMENT_TYPE_VALUETYPE:
+            {
+                _ASSERTE(!"Should have been replaced by a native value type!");
+                break;
+            }
+
+            case ELEMENT_TYPE_PTR:
+            {
+                // Don't transform pointer types to ELEMENT_TYPE_I. The JIT can handle the correct type information,
+                // and it's required for some cases (such as SwiftError*).
+                break;
+            }
+
+            case ELEMENT_TYPE_BYREF:
+            {
+                // Transform ELEMENT_TYPE_BYREF to ELEMENT_TYPE_PTR to retain the pointed-to type information
+                // while making the type blittable.
+                *elementType = ELEMENT_TYPE_PTR;
+                break;
+            }
+
+            case ELEMENT_TYPE_INTERNAL:
+            {
+                // JIT will handle structures
+                if (pLoc->InternalToken.IsValueType())
+                {
+                    _ASSERTE(pLoc->InternalToken.IsNativeValueType() || !pLoc->InternalToken.GetMethodTable()->ContainsGCPointers());
+                    break;
+                }
+                FALLTHROUGH;
+            }
+
+            case ELEMENT_TYPE_CMOD_REQD:
+            case ELEMENT_TYPE_CMOD_OPT:
+            {
+                _ASSERTE("Custom modifiers should be represented in a LocalDesc as ELEMENT_TYPE_CMOD_INTERNAL. Use AddModifier to add custom modifiers.");
+                FALLTHROUGH;
+            }
+            case ELEMENT_TYPE_CMOD_INTERNAL:
+            {
+                again = true;
+                break;
+            }
+
+            // ref types -> ELEMENT_TYPE_I
+            default:
+            {
+                pLoc->ElementType[0] = ELEMENT_TYPE_I;
+                pLoc->cbType = 1;
+                return;
+            }
         }
+        elementType++;
+        _ASSERTE(elementType - pLoc->ElementType <= (ptrdiff_t)pLoc->cbType);
     }
+    while(again);
 }
 
 Module *ILStubLinker::GetStubSigModule()
@@ -3139,16 +3333,16 @@ int ILStubLinker::GetToken(MethodDesc* pMD, mdToken typeSignature, mdToken metho
     return m_tokenMap.GetToken(pMD, typeSignature, methodSignature);
 }
 
-int ILStubLinker::GetToken(MethodTable* pMT)
-{
-    STANDARD_VM_CONTRACT;
-    return m_tokenMap.GetToken(TypeHandle(pMT));
-}
-
 int ILStubLinker::GetToken(TypeHandle th)
 {
     STANDARD_VM_CONTRACT;
     return m_tokenMap.GetToken(th);
+}
+
+int ILStubLinker::GetToken(TypeHandle th, mdToken typeSignature)
+{
+    STANDARD_VM_CONTRACT;
+    return m_tokenMap.GetToken(th, typeSignature);
 }
 
 int ILStubLinker::GetToken(FieldDesc* pFD)
@@ -3161,6 +3355,12 @@ int ILStubLinker::GetToken(FieldDesc* pFD, mdToken typeSignature)
 {
     STANDARD_VM_CONTRACT;
     return m_tokenMap.GetToken(pFD, typeSignature);
+}
+
+int ILStubLinker::GetUserStringToken(SString s)
+{
+    STANDARD_VM_CONTRACT;
+    return m_tokenMap.GetUserStringToken(std::move(s));
 }
 
 int ILStubLinker::GetSigToken(PCCOR_SIGNATURE pSig, DWORD cbSig)
@@ -3188,6 +3388,7 @@ void ILStubLinker::ClearCode()
 
     DeleteCodeLabels();
     ClearCodeStreams();
+    DeleteEHClauses();
 }
 
 void ILStubLinker::SetStubMethodDesc(MethodDesc* pMD)
@@ -3258,6 +3459,11 @@ int ILCodeStream::GetToken(TypeHandle th)
 {
     STANDARD_VM_CONTRACT;
     return m_pOwner->GetToken(th);
+}
+int ILCodeStream::GetToken(TypeHandle th, mdToken typeSignature)
+{
+    STANDARD_VM_CONTRACT;
+    return m_pOwner->GetToken(th, typeSignature);
 }
 int ILCodeStream::GetToken(FieldDesc* pFD)
 {

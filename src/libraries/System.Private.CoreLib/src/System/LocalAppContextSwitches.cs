@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace System
@@ -8,6 +9,7 @@ namespace System
     internal static partial class LocalAppContextSwitches
     {
         private static int s_enableUnsafeUTF7Encoding;
+        [FeatureSwitchDefinition("System.Text.Encoding.EnableUnsafeUTF7Encoding")]
         public static bool EnableUnsafeUTF7Encoding
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -59,7 +61,7 @@ namespace System
         public static bool SerializationGuard
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => GetCachedSwitchValue("Switch.System.Runtime.Serialization.SerializationGuard", ref s_serializationGuard);
+            get => GetCachedSwitchValue("Switch.System.Runtime.Serialization.SerializationGuard", ref s_serializationGuard, defaultValue: true);
         }
 
         private static int s_showILOffset;

@@ -15,188 +15,52 @@
 #include "typectxt.h"
 #include "genericdict.h"
 
-// ============================================================================
-// UTF8 string hash table helper.
-// ============================================================================
-EEHashEntry_t * EEUtf8HashTableHelper::AllocateEntry(LPCUTF8 pKey, BOOL bDeepCopy, void *pHeap)
-{
-    CONTRACTL
-    {
-        NOTHROW;
-        GC_NOTRIGGER;
-        INJECT_FAULT(return NULL;);
-    }
-    CONTRACTL_END
-
-    EEHashEntry_t *pEntry;
-
-    if (bDeepCopy)
-    {
-        SIZE_T StringLen = strlen(pKey);
-        SIZE_T BufLen = 0;
-        if (!ClrSafeInt<SIZE_T>::addition(StringLen, SIZEOF_EEHASH_ENTRY + sizeof(LPUTF8) + 1, BufLen))
-            return NULL;
-        pEntry = (EEHashEntry_t *) new (nothrow) BYTE[BufLen];
-        if (!pEntry)
-            return NULL;
-
-        memcpy(pEntry->Key + sizeof(LPUTF8), pKey, StringLen + 1);
-        *((LPUTF8*)pEntry->Key) = (LPUTF8)(pEntry->Key + sizeof(LPUTF8));
-    }
-    else
-    {
-        pEntry = (EEHashEntry_t *) new (nothrow)BYTE[SIZEOF_EEHASH_ENTRY + sizeof(LPUTF8)];
-        if (pEntry)
-            *((LPCUTF8*)pEntry->Key) = pKey;
-    }
-
-    return pEntry;
-}
-
-
-void EEUtf8HashTableHelper::DeleteEntry(EEHashEntry_t *pEntry, void *pHeap)
-{
-    CONTRACTL
-    {
-        NOTHROW;
-        GC_NOTRIGGER;
-        FORBID_FAULT;
-    }
-    CONTRACTL_END
-
-    delete [] (BYTE*)pEntry;
-}
-
-
-BOOL EEUtf8HashTableHelper::CompareKeys(EEHashEntry_t *pEntry, LPCUTF8 pKey)
-{
-    LIMITED_METHOD_DAC_CONTRACT;
-
-    LPCUTF8 pEntryKey = *((LPCUTF8*)pEntry->Key);
-    return (strcmp(pEntryKey, pKey) == 0) ? TRUE : FALSE;
-}
-
-
-DWORD EEUtf8HashTableHelper::Hash(LPCUTF8 pKey)
-{
-    LIMITED_METHOD_DAC_CONTRACT;
-
-    DWORD dwHash = 0;
-
-    while (*pKey != 0)
-    {
-        dwHash = (dwHash << 5) + (dwHash >> 5) + (*pKey);
-        pKey++;
-    }
-
-    return dwHash;
-}
-
-
-LPCUTF8 EEUtf8HashTableHelper::GetKey(EEHashEntry_t *pEntry)
-{
-    LIMITED_METHOD_CONTRACT;
-
-    return *((LPCUTF8*)pEntry->Key);
-}
-
 #ifndef DACCESS_COMPILE
 
 // ============================================================================
-// Unicode string hash table helper.
+// Bucket array allocation helpers for EEHashTable.
 // ============================================================================
-EEHashEntry_t * EEUnicodeHashTableHelper::AllocateEntry(EEStringData *pKey, BOOL bDeepCopy, void *pHeap)
+
+// Allocate a zero-initialized bucket array with space for 'dwNumBuckets' buckets
+// plus a reserved leading slot. Returns a pointer past the leading slot (matching
+// the m_pBuckets convention), or NULL on failure.
+EEHashEntry_t** AllocateEEHashBuckets(DWORD dwNumBuckets)
 {
     CONTRACTL
     {
         NOTHROW;
         GC_NOTRIGGER;
-        INJECT_FAULT(return NULL;);
     }
     CONTRACTL_END
 
-    EEHashEntry_t *pEntry;
+    DWORD dwNumBucketsPlusOne;
+    if (!ClrSafeInt<DWORD>::addition(dwNumBuckets, 1, dwNumBucketsPlusOne))
+        return NULL;
 
-    if (bDeepCopy)
-    {
-        pEntry = (EEHashEntry_t *) new (nothrow) BYTE[SIZEOF_EEHASH_ENTRY + sizeof(EEStringData) + ((pKey->GetCharCount() + 1) * sizeof(WCHAR))];
-        if (pEntry) {
-            EEStringData *pEntryKey = (EEStringData *)(&pEntry->Key);
-            pEntryKey->SetIsOnlyLowChars (pKey->GetIsOnlyLowChars());
-            pEntryKey->SetCharCount (pKey->GetCharCount());
-            pEntryKey->SetStringBuffer ((LPWSTR) ((LPBYTE)pEntry->Key + sizeof(EEStringData)));
-            memcpy((LPWSTR)pEntryKey->GetStringBuffer(), pKey->GetStringBuffer(), pKey->GetCharCount() * sizeof(WCHAR));
-        }
-    }
-    else
-    {
-        pEntry = (EEHashEntry_t *) new (nothrow) BYTE[SIZEOF_EEHASH_ENTRY + sizeof(EEStringData)];
-        if (pEntry) {
-            EEStringData *pEntryKey = (EEStringData *) pEntry->Key;
-            pEntryKey->SetIsOnlyLowChars (pKey->GetIsOnlyLowChars());
-            pEntryKey->SetCharCount (pKey->GetCharCount());
-            pEntryKey->SetStringBuffer (pKey->GetStringBuffer());
-        }
-    }
+    S_SIZE_T safeSize(sizeof(EEHashEntry_t*));
+    safeSize *= dwNumBucketsPlusOne;
+    if (safeSize.IsOverflow())
+        return NULL;
 
-    return pEntry;
+    SIZE_T cbAlloc = safeSize.Value();
+    EEHashEntry_t** pBuckets = (EEHashEntry_t**) new (nothrow) BYTE[cbAlloc];
+    if (pBuckets == NULL)
+        return NULL;
+
+    memset(pBuckets, 0, cbAlloc);
+
+    // The first slot is reserved; usable buckets start after it.
+    return pBuckets + 1;
 }
 
-
-void EEUnicodeHashTableHelper::DeleteEntry(EEHashEntry_t *pEntry, void *pHeap)
+void FreeEEHashBuckets(EEHashEntry_t** pBuckets)
 {
     LIMITED_METHOD_CONTRACT;
-
-    delete [] (BYTE*)pEntry;
-}
-
-
-BOOL EEUnicodeHashTableHelper::CompareKeys(EEHashEntry_t *pEntry, EEStringData *pKey)
-{
-    LIMITED_METHOD_CONTRACT;
-
-    EEStringData *pEntryKey = (EEStringData*) pEntry->Key;
-
-    // Same buffer, same string.
-    if (pEntryKey->GetStringBuffer() == pKey->GetStringBuffer())
-        return TRUE;
-
-    // Length not the same, never a match.
-    if (pEntryKey->GetCharCount() != pKey->GetCharCount())
-        return FALSE;
-
-    // Compare the entire thing.
-    // We'll deliberately ignore the bOnlyLowChars field since this derived from the characters
-    return !memcmp(pEntryKey->GetStringBuffer(), pKey->GetStringBuffer(), pEntryKey->GetCharCount() * sizeof(WCHAR));
-}
-
-
-DWORD EEUnicodeHashTableHelper::Hash(EEStringData *pKey)
-{
-    LIMITED_METHOD_CONTRACT;
-
-    return (HashBytes((const BYTE *) pKey->GetStringBuffer(), pKey->GetCharCount()*sizeof(WCHAR)));
-}
-
-
-EEStringData *EEUnicodeHashTableHelper::GetKey(EEHashEntry_t *pEntry)
-{
-    LIMITED_METHOD_CONTRACT;
-
-    return (EEStringData*)pEntry->Key;
-}
-
-void EEUnicodeHashTableHelper::ReplaceKey(EEHashEntry_t *pEntry, EEStringData *pNewKey)
-{
-    LIMITED_METHOD_CONTRACT;
-
-    ((EEStringData*)pEntry->Key)->SetStringBuffer (pNewKey->GetStringBuffer());
-    ((EEStringData*)pEntry->Key)->SetCharCount (pNewKey->GetCharCount());
-    ((EEStringData*)pEntry->Key)->SetIsOnlyLowChars (pNewKey->GetIsOnlyLowChars());
+    delete[] (BYTE*)(pBuckets - 1);
 }
 
 // ============================================================================
-// Unicode stringliteral hash table helper.
+// Unicode string literal hash table helper.
 // ============================================================================
 EEHashEntry_t * EEUnicodeStringLiteralHashTableHelper::AllocateEntry(EEStringData *pKey, BOOL bDeepCopy, void *pHeap)
 {

@@ -22,7 +22,7 @@ namespace Microsoft.Extensions.Hosting
     {
         private static bool IsRemoteExecutorSupportedAndPrivilegedProcess => RemoteExecutor.IsSupported && PlatformDetection.IsPrivilegedProcess;
 
-        [ConditionalFact(nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
+        [ConditionalFact(typeof(WindowsServiceLifetimeTests), nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
         public void ServiceStops()
         {
             using var serviceTester = WindowsServiceTester.Create(async () =>
@@ -63,7 +63,7 @@ namespace Microsoft.Extensions.Hosting
             Assert.Equal(0, status.win32ExitCode);
         }
 
-        [ConditionalFact(nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
+        [ConditionalFact(typeof(WindowsServiceLifetimeTests), nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
         [SkipOnTargetFramework(TargetFrameworkMonikers.NetFramework, ".NET Framework is missing the fix from https://github.com/dotnet/corefx/commit/3e68d791066ad0fdc6e0b81828afbd9df00dd7f8")]
         public void ExceptionOnStartIsPropagated()
         {
@@ -84,7 +84,7 @@ namespace Microsoft.Extensions.Hosting
             Assert.Equal(Interop.Errors.ERROR_EXCEPTION_IN_SERVICE, status.win32ExitCode);
         }
 
-        [ConditionalFact(nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
+        [ConditionalFact(typeof(WindowsServiceLifetimeTests), nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
         public void ExceptionOnStopIsPropagated()
         {
             using var serviceTester = WindowsServiceTester.Create(async () =>
@@ -106,7 +106,7 @@ namespace Microsoft.Extensions.Hosting
             Assert.Equal(Interop.Errors.ERROR_PROCESS_ABORTED, status.win32ExitCode);
         }
 
-        [ConditionalFact(nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
+        [ConditionalFact(typeof(WindowsServiceLifetimeTests), nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
         public void CancelStopAsync()
         {
             using var serviceTester = WindowsServiceTester.Create(async () =>
@@ -129,7 +129,7 @@ namespace Microsoft.Extensions.Hosting
             Assert.Equal(Interop.Errors.ERROR_PROCESS_ABORTED, status.win32ExitCode);
         }
 
-        [ConditionalFact(nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
+        [ConditionalFact(typeof(WindowsServiceLifetimeTests), nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
         public void ServiceCanStopItself()
         {
             using (var serviceTester = WindowsServiceTester.Create(async () =>
@@ -171,7 +171,7 @@ namespace Microsoft.Extensions.Hosting
                 serviceTester.Start();
 
                 // service will proceed to stopped without any error
-                serviceTester.WaitForStatus(ServiceControllerStatus.Stopped);
+                serviceTester.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.MaxValue);
 
                 var status = serviceTester.QueryServiceStatus();
                 Assert.Equal(0, status.win32ExitCode);
@@ -194,7 +194,9 @@ namespace Microsoft.Extensions.Hosting
                 """, logText);
         }
 
-        [ConditionalFact(nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
+        private static AutoResetEvent s_are = new AutoResetEvent(false);
+
+        [ConditionalFact(typeof(WindowsServiceLifetimeTests), nameof(IsRemoteExecutorSupportedAndPrivilegedProcess))]
         public void ServiceSequenceIsCorrect()
         {
             using (var serviceTester = WindowsServiceTester.Create(() =>
@@ -208,8 +210,16 @@ namespace Microsoft.Extensions.Hosting
                     })
                     .Build();
 
+                var windowsService = (LoggingWindowsServiceLifetime)host.Services.GetRequiredService<IHostLifetime>();
+                windowsService.WaitOnStop = true;
+
                 var applicationLifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
-                applicationLifetime.ApplicationStarted.Register(() => FileLogger.Log($"lifetime started"));
+                applicationLifetime.ApplicationStarted.Register(() =>
+                {
+                    FileLogger.Log($"lifetime started");
+                    s_are.Set();
+                });
+
                 applicationLifetime.ApplicationStopping.Register(() => FileLogger.Log($"lifetime stopping"));
                 applicationLifetime.ApplicationStopped.Register(() => FileLogger.Log($"lifetime stopped"));
 
@@ -260,6 +270,8 @@ namespace Microsoft.Extensions.Hosting
                 base(environment, applicationLifetime, loggerFactory, optionsAccessor)
             { }
 
+            public bool WaitOnStop { get; set; }
+
             protected override void OnStart(string[] args)
             {
                 FileLogger.Log("WindowsServiceLifetime.OnStart");
@@ -268,6 +280,10 @@ namespace Microsoft.Extensions.Hosting
 
             protected override void OnStop()
             {
+                if (WaitOnStop)
+                {
+                    s_are.WaitOne();
+                }
                 FileLogger.Log("WindowsServiceLifetime.OnStop");
                 base.OnStop();
             }

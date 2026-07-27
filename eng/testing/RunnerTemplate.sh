@@ -14,7 +14,7 @@ EXECUTION_DIR=$(dirname "$0")
 RUNTIME_PATH=''
 RSP_FILE=''
 
-while [[ $# > 0 ]]; do
+while [[ $# -gt 0 ]]; do
   opt="$(echo "${1}" | tr "[:upper:]" "[:lower:]")"
   case "$opt" in
     --help|-h)
@@ -45,9 +45,6 @@ if [[ -z "$RUNTIME_PATH" ]]; then
   exit -1
 fi
 
-# Don't use a globally installed SDK.
-export DOTNET_MULTILEVEL_LOOKUP=0
-
 exitcode_list[0]="Exited Successfully"
 exitcode_list[130]="SIGINT  Ctrl-C occurred. Likely tests timed out."
 exitcode_list[131]="SIGQUIT Ctrl-\ occurred. Core dumped."
@@ -56,7 +53,7 @@ exitcode_list[133]="SIGTRAP Breakpoint hit. Core dumped."
 exitcode_list[134]="SIGABRT Abort. Managed or native assert, or runtime check such as heap corruption, caused call to abort(). Core dumped."
 exitcode_list[135]="IGBUS   Unaligned memory access. Core dumped."
 exitcode_list[136]="SIGFPE  Bad floating point arguments. Core dumped."
-exitcode_list[137]="SIGKILL Killed either due to out of memory/resources (see /var/log/messages) or by explicit kill."
+exitcode_list[137]="SIGKILL Killed either due to out of memory/resources (see /var/log/messages) or by explicit kill. No dump will be available for this."
 exitcode_list[139]="SIGSEGV Illegal memory access. Deref invalid pointer, overrunning buffer, stack overflow etc. Core dumped."
 exitcode_list[143]="SIGTERM Terminated. Usually before SIGKILL."
 exitcode_list[159]="SIGSYS  Bad System Call."
@@ -79,23 +76,19 @@ function invoke_xunitlogchecker {
   local dump_folder=$1
 
   total_dumps=$(find $dump_folder -name "*.dmp" | wc -l)
-  
-  if [[ $total_dumps > 0 ]]; then
-    echo "Total dumps found in $dump_folder: $total_dumps"
-    xunitlogchecker_file_name="$HELIX_CORRELATION_PAYLOAD/XUnitLogChecker.dll"
-    dotnet_file_name="$RUNTIME_PATH/dotnet"
 
-    if [[ ! -f $dotnet_file_name ]]; then
-      echo "'$dotnet_file_name' was not found. Unable to run XUnitLogChecker."
-      xunitlogchecker_exit_code=1
-    elif [[ ! -f $xunitlogchecker_file_name ]]; then 
-      echo "'$xunitlogchecker_file_name' was not found. Unable to print dump file contents."
+  if [[ $total_dumps -gt 0 ]]; then
+    echo "Total dumps found in $dump_folder: $total_dumps"
+    xunitlogchecker_file_name="$HELIX_CORRELATION_PAYLOAD/XUnitLogChecker"
+
+    if [[ ! -f $xunitlogchecker_file_name ]]; then
+      echo "XUnitLogChecker does not exist in the expected location: $xunitlogchecker_file_name"
       xunitlogchecker_exit_code=2
     elif [[ ! -d $dump_folder ]]; then
       echo "The dump directory '$dump_folder' does not exist."
     else
       echo "Executing XUnitLogChecker in $dump_folder..."
-      cmd="$dotnet_file_name --roll-forward Major $xunitlogchecker_file_name --dumps-path $dump_folder"
+      cmd="$xunitlogchecker_file_name --dumps-path $dump_folder"
       echo "$cmd"
       $cmd
       xunitlogchecker_exit_code=$?
@@ -207,7 +200,7 @@ if [[ $system_name == "Linux" && $test_exitcode -ne 0 ]]; then
   if [[ -e /proc/sys/kernel/core_uses_pid && "1" == $(cat /proc/sys/kernel/core_uses_pid) ]]; then
     core_name_uses_pid=1
   fi
-  
+
   # The osx dumps are too large to egress the machine
   echo Looking around for any Linux dumps...
 
@@ -229,6 +222,25 @@ if [ -n "$HELIX_WORKITEM_PAYLOAD" ]; then
   # For abrupt failures, in Helix, dump some of the kernel log, in case there is a hint
   if [[ $test_exitcode -ne 1 ]]; then
     dmesg | tail -50
+
+    # For exit code 137 (SIGKILL, typically OOM killer), check cgroup v2 memory.events
+    # as a fallback to confirm whether the OOM killer fired (e.g., if dmesg is unavailable).
+    # Silent no-op on macOS, cgroup v1, or any system without /proc/self/cgroup.
+    if [[ $test_exitcode -eq 137 && -f /proc/self/cgroup ]]; then
+      # /proc/self/cgroup contains colon-delimited lines; on cgroup v2, a single line like:
+      #   0::/system.slice/helix-agent.service
+      # Extract field 3 (the cgroup path) from the line where field1=="0" and field2==""
+      cg_path=$(awk -F: '$1=="0" && $2=="" {print $3; exit}' /proc/self/cgroup)
+      cg_path=${cg_path#/}  # strip leading slash for path concatenation
+      # Prefer the process-specific cgroup path (more relevant), fall back to root cgroup
+      for memevents in ${cg_path:+/sys/fs/cgroup/$cg_path/memory.events} /sys/fs/cgroup/memory.events; do
+        if [[ -f "$memevents" ]]; then
+          echo "cgroup memory.events ($memevents):"
+          cat "$memevents"
+          break
+        fi
+      done
+    fi
   fi
 
 fi
@@ -240,8 +252,9 @@ elif [[ -z "$__IsXUnitLogCheckerSupported" ]]; then
 elif [[ "$__IsXUnitLogCheckerSupported" != "1" ]]; then
   echo "XUnitLogChecker not supported for this test case. Skipping."
 else
+  echo "XUnitLogChecker status: $__IsXUnitLogCheckerSupported"
   echo ----- start ===============  XUnitLogChecker Output =====================================================
-  
+
   invoke_xunitlogchecker "$HELIX_DUMP_FOLDER"
 
   if [[ $xunitlogchecker_exit_code -ne 0 ]]; then

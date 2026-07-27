@@ -21,7 +21,8 @@ enum {
     LF_ALL           = 0xFFFFFFFF, // Used only to mask bits. Never use as LOG((LF_ALL, ...))
 
     // LogFacility2: all 32-bit of LogFacility are used, need a 2nd DWORD for more facilities
-    LF2_MULTICOREJIT = 0x00000001  // Multicore JIT
+    LF2_MULTICOREJIT = 0x00000001, // Multicore JIT
+    LF2_INTERPRETER  = 0x00000002, // Interpreter
 };
 
 
@@ -46,6 +47,10 @@ enum {
 #define WARNING     0
 #define ERROR       0
 #define FATALERROR  0
+
+#ifdef _DEBUG
+#define _LOGALLOC
+#endif
 
 #ifndef LOGGING
 

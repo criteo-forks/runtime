@@ -128,12 +128,7 @@ private:
 class DispParamArrayMarshaler : public DispParamMarshaler
 {
 public:
-    DispParamArrayMarshaler(VARTYPE ElementVT, MethodTable *pElementMT) :
-    m_ElementVT(ElementVT),
-    m_pElementMT(pElementMT)
-    {
-        WRAPPER_NO_CONTRACT;
-    }
+    DispParamArrayMarshaler(VARTYPE ElementVT, MethodTable *pElementMT);
 
     virtual ~DispParamArrayMarshaler()
     {
@@ -147,6 +142,8 @@ public:
 private:
     VARTYPE                 m_ElementVT;
     MethodTable*            m_pElementMT;
+    PCODE                   m_pConvertContentsToManagedCode;
+    PCODE                   m_pConvertContentsToUnmanagedCode;
 };
 
 
@@ -196,8 +193,8 @@ private:
 class DispParamCustomMarshaler : public DispParamMarshaler
 {
 public:
-    DispParamCustomMarshaler(CustomMarshalerHelper *pCMHelper, VARTYPE vt) :
-    m_pCMHelper(pCMHelper),
+    DispParamCustomMarshaler(CustomMarshalerInfo *pCMHelper, VARTYPE vt) :
+    m_pCMInfo(pCMHelper),
     m_vt(vt)
     {
         WRAPPER_NO_CONTRACT;
@@ -215,8 +212,8 @@ public:
     virtual void CleanUpManaged(OBJECTREF *pObj);
 
 private:
-    CustomMarshalerHelper*  m_pCMHelper;
-    VARTYPE                 m_vt;
+    CustomMarshalerInfo* m_pCMInfo;
+    VARTYPE              m_vt;
 };
 
 #endif // _DISPPARAMMARSHALER_H

@@ -3,38 +3,32 @@
 
 using System;
 using System.Collections.Generic;
+using System.Xml;
+using System.Xml.Schema;
 using System.Xml.Serialization;
+using SerializationTypes;
 using Xunit;
 
 public static partial class XmlSerializerTests
 {
+    // Move this test to XmlSerializerTests.cs once #1401 is fixed for the ReflectionOnly serializer.
     [Fact]
-    // XmlTypeMapping is not included in System.Xml.XmlSerializer 4.0.0.0 facade in GAC
-    public static void Xml_FromMappings()
+    public static void Xml_DerivedIXmlSerializable()
     {
-        var types = new[] { typeof(Guid), typeof(List<string>) };
-        XmlReflectionImporter importer = new XmlReflectionImporter();
-        XmlTypeMapping[] mappings = new XmlTypeMapping[types.Length];
-        for (int i = 0; i < types.Length; i++)
-        {
-            mappings[i] = importer.ImportTypeMapping(types[i]);
-        }
-        var serializers = XmlSerializer.FromMappings(mappings, typeof(object));
-        Xml_GuidAsRoot_Helper(serializers[0]);
-        Xml_ListGenericRoot_Helper(serializers[1]);
+        var dClass = new XmlSerializableDerivedClass() { AttributeString = "derivedIXmlSerTest", DateTimeValue = DateTime.Parse("Dec 31, 1999"), BoolValue = true };
+
+        var expectedXml = WithXmlHeader(@$"<BaseIXmlSerializable xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" xsi:type=""DerivedIXmlSerializable"" AttributeString=""derivedIXmlSerTest"" DateTimeValue=""1999-12-31T00:00:00"" BoolValue=""True"" xmlns=""{XmlSerializableBaseClass.XmlNamespace}"" />");
+        var fromBase = SerializeAndDeserialize(dClass, expectedXml, () => new XmlSerializer(typeof(XmlSerializableBaseClass), new Type[] { typeof(XmlSerializableDerivedClass) }));
+        Assert.Equal(dClass.AttributeString, fromBase.AttributeString);
+        Assert.Equal(dClass.DateTimeValue, fromBase.DateTimeValue);
+        Assert.Equal(dClass.BoolValue, fromBase.BoolValue);
+
+        // Derived class does not apply XmlRoot attribute to force itself to be emitted with the base class element name, so update expected xml accordingly.
+        // Since we can't smartly emit xsi:type during serialization though, it is still there even though it isn't needed.
+        expectedXml = WithXmlHeader(@"<DerivedIXmlSerializable xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" xsi:type=""DerivedIXmlSerializable"" AttributeString=""derivedIXmlSerTest"" DateTimeValue=""1999-12-31T00:00:00"" BoolValue=""True"" />");
+        var fromDerived = SerializeAndDeserialize(dClass, expectedXml, () => new XmlSerializer(typeof(XmlSerializableDerivedClass)));
+        Assert.Equal(dClass.AttributeString, fromDerived.AttributeString);
+        Assert.Equal(dClass.DateTimeValue, fromDerived.DateTimeValue);
+        Assert.Equal(dClass.BoolValue, fromDerived.BoolValue);
     }
-
-    [Fact]
-    // XmlTypeMapping is not included in System.Xml.XmlSerializer 4.0.0.0 facade in GAC
-    public static void Xml_ConstructorWithTypeMapping()
-    {
-        XmlTypeMapping mapping = null;
-        XmlSerializer serializer = null;
-        Assert.Throws<ArgumentNullException>(() => { new XmlSerializer(mapping); });
-
-        mapping = new XmlReflectionImporter(null, null).ImportTypeMapping(typeof(List<string>));
-        serializer = new XmlSerializer(mapping);
-        Xml_ListGenericRoot_Helper(serializer);
-    }
-
 }

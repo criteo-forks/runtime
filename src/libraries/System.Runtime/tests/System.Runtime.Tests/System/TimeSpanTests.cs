@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Text;
 using Xunit;
 
@@ -631,7 +632,7 @@ namespace System.Tests
         [InlineData(0, -(maxSeconds + 1), 0, 0)]
         [InlineData(0, 0, maxMilliseconds + 1, 0)]
         [InlineData(0, 0, -(maxMilliseconds + 1), 0)]
-        [InlineData(0, 0, 0, maxMicroseconds + 1)]        
+        [InlineData(0, 0, 0, maxMicroseconds + 1)]
         [InlineData(0, 0, 0, -(maxMicroseconds + 1))]
         public static void FromMinutes_Int_ShouldOverflow(long minutes, long seconds, long milliseconds, long microseconds)
         {
@@ -713,7 +714,16 @@ namespace System.Tests
             long ticksFromMicroseconds = microseconds * TimeSpan.TicksPerMicrosecond;
             var expected = TimeSpan.FromTicks(ticksFromMilliseconds + ticksFromMicroseconds);
             Assert.Equal(expected, TimeSpan.FromMilliseconds(milliseconds, microseconds));
+
+            expected = TimeSpan.FromTicks(ticksFromMilliseconds);
+            Assert.Equal(expected, TimeSpan.FromMilliseconds(milliseconds));
+
+            // The following exist to ensure compilation of the expressions
+            Expression<Action> a = () => TimeSpan.FromMilliseconds(milliseconds);
+            Expression<Action> b = () => TimeSpan.FromMilliseconds(milliseconds, microseconds);
+            Expression<Action> c = () => TimeSpan.FromMilliseconds((double)milliseconds);
         }
+
         [Theory]
         [InlineData(maxMilliseconds + 1, 0)]
         [InlineData(-(maxMilliseconds + 1), 0)]
@@ -730,6 +740,11 @@ namespace System.Tests
         public static void FromMilliseconds_Int_ShouldOverflow(long milliseconds, long microseconds)
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => TimeSpan.FromMilliseconds(milliseconds, microseconds));
+
+            if (microseconds == 0)
+            {
+                Assert.Throws<ArgumentOutOfRangeException>(() => TimeSpan.FromMilliseconds(milliseconds));
+            }
         }
 
         [Theory]
@@ -1760,7 +1775,7 @@ namespace System.Tests
         [Theory, MemberData(nameof(MultiplicationTestData))]
         public static void Division(TimeSpan timeSpan, double factor, TimeSpan expected)
         {
-            Assert.Equal(factor, expected / timeSpan, 14);
+            AssertExtensions.Equal(factor, expected / timeSpan, 1e-14);
             double divisor = 1.0 / factor;
             Assert.Equal(expected, timeSpan / divisor);
         }
@@ -1803,7 +1818,7 @@ namespace System.Tests
         [Theory, MemberData(nameof(MultiplicationTestData))]
         public static void NamedDivision(TimeSpan timeSpan, double factor, TimeSpan expected)
         {
-            Assert.Equal(factor, expected.Divide(timeSpan), 14);
+            AssertExtensions.Equal(factor, expected.Divide(timeSpan), 1e-14);
             double divisor = 1.0 / factor;
             Assert.Equal(expected, timeSpan.Divide(divisor));
         }

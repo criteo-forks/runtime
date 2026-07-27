@@ -22,7 +22,6 @@
 #include "peassembly.h"
 #include "typehash.h"
 #include "contractimpl.h"
-#include "bitmask.h"
 #include "instmethhash.h"
 #include "eetwain.h"    // For EnumGCRefs (we should probably move that somewhere else, but can't
                         // find anything better (modulo common or vars.hpp)
@@ -43,24 +42,19 @@
 #include "ilinstrumentation.h"
 #include "codeversion.h"
 
-class Stub;
 class MethodDesc;
 class FieldDesc;
 class Crst;
-class ClassConverter;
 class RefClassWriter;
 class ReflectionModule;
 class EEStringData;
 class MethodDescChunk;
 class SigTypeContext;
 class Assembly;
-class BaseDomain;
 class AppDomain;
-class DomainModule;
 class SystemDomain;
 class Module;
 class SString;
-class Pending;
 class MethodTable;
 class DynamicMethodTable;
 class TieredCompilationManager;
@@ -95,11 +89,11 @@ struct DynamicMetadata
 {
     uint32_t Size;
     BYTE Data[0];
-    template<typename T> friend struct ::cdac_offsets;
+    friend struct ::cdac_data<DynamicMetadata>;
 };
 
 template<>
-struct cdac_offsets<DynamicMetadata>
+struct cdac_data<DynamicMetadata>
 {
     static constexpr size_t Size = offsetof(DynamicMetadata, Size);
     static constexpr size_t Data = offsetof(DynamicMetadata, Data);
@@ -349,7 +343,7 @@ struct VASigCookie
     // The JIT wants knows that the size of the arguments comes first
     // so please keep this field first
     unsigned        sizeOfArgs;             // size of argument list
-    Volatile<PCODE> pNDirectILStub;         // will be use if target is NDirect (tag == 0)
+    Volatile<PCODE> pPInvokeILStub;         // will be use if target is PInvoke (tag == 0)
     PTR_Module      pModule;
     PTR_Module      pLoaderModule;
     Signature       signature;
@@ -357,12 +351,18 @@ struct VASigCookie
     Instantiation   methodInst;
 };
 
+template<>
+struct cdac_data<VASigCookie>
+{
+    static constexpr size_t Signature = offsetof(VASigCookie, signature);
+};
+
 //
 // VASigCookies are allocated in VASigCookieBlocks to amortize
 // allocation cost and allow proper bookkeeping.
 //
 
-struct VASigCookieBlock
+struct VASigCookieBlock final
 {
     enum {
 #ifdef _DEBUG
@@ -373,16 +373,10 @@ struct VASigCookieBlock
     };
 
     VASigCookieBlock    *m_Next;
-    UINT                 m_numcookies;
+    UINT                 m_numCookies;
     VASigCookie          m_cookies[kVASigCookieBlockSize];
 };
 
-//
-// A Module is the primary unit of code packaging in the runtime.  It
-// corresponds mostly to an OS executable image, although other kinds
-// of modules exist.
-//
-class UMEntryThunk;
 
 // Hashtable of absolute addresses of IL blobs for dynamics, keyed by token
 
@@ -435,6 +429,16 @@ public:
 typedef SHash<DynamicILBlobTraits> DynamicILBlobTable;
 typedef DPTR(DynamicILBlobTable) PTR_DynamicILBlobTable;
 
+template<>
+struct cdac_data<DynamicILBlobTable>
+{
+    static constexpr size_t Table = offsetof(DynamicILBlobTable, m_table);
+    static constexpr size_t TableSize = offsetof(DynamicILBlobTable, m_tableSize);
+    static constexpr size_t EntrySize = sizeof(DynamicILBlobEntry);
+    static constexpr size_t EntryMethodToken = offsetof(DynamicILBlobEntry, m_methodToken);
+    static constexpr size_t EntryIL = offsetof(DynamicILBlobEntry, m_il);
+};
+
 #ifdef FEATURE_READYTORUN
 typedef DPTR(class ReadyToRunInfo)      PTR_ReadyToRunInfo;
 #endif
@@ -446,7 +450,6 @@ class ModuleBase
 {
 #ifdef DACCESS_COMPILE
     friend class ClrDataAccess;
-    friend class NativeImageDumper;
 #endif
 
     friend class DataImage;
@@ -470,7 +473,7 @@ protected:
     // The vtable needs to match between DAC and non-DAC, but we don't want any use of IsSigInIL in the DAC
     virtual BOOL IsSigInILImpl(PCCOR_SIGNATURE signature) { return FALSE; } // ModuleBase doesn't have a PE image to examine
     // The vtable needs to match between DAC and non-DAC, but we don't want any use of LoadAssembly in the DAC
-    virtual DomainAssembly * LoadAssemblyImpl(mdAssemblyRef kAssemblyRef) = 0;
+    virtual Assembly * LoadAssemblyImpl(mdAssemblyRef kAssemblyRef) = 0;
 
     // The vtable needs to match between DAC and non-DAC, but we don't want any use of ThrowTypeLoadException in the DAC
     virtual void DECLSPEC_NORETURN ThrowTypeLoadExceptionImpl(IMDInternalImport *pInternalImport,
@@ -547,7 +550,7 @@ public:
     virtual PTR_Module LookupModule(mdToken kFile) { return NULL; }; //wrapper over GetModuleIfLoaded, takes modulerefs as well
     virtual Module *GetModuleIfLoaded(mdFile kFile) { return NULL; };
 #ifndef DACCESS_COMPILE
-    virtual DomainAssembly *LoadModule(mdFile kFile);
+    virtual Module *LoadModule(mdFile kFile);
 #endif
     DWORD GetAssemblyRefFlags(mdAssemblyRef tkAssemblyRef);
 
@@ -556,7 +559,6 @@ public:
     virtual Assembly * GetAssemblyIfLoaded(
             mdAssemblyRef       kAssemblyRef,
             IMDInternalImport * pMDImportOverride = NULL,
-            BOOL                fDoNotUtilizeExtraChecks = FALSE,
             AssemblyBinder      *pBinderForLoadedAssembly = NULL
             )
     {
@@ -577,14 +579,14 @@ public:
 
     // The vtable needs to match between DAC and non-DAC, but we don't want any use of IsSigInIL in the DAC
     BOOL IsSigInIL(PCCOR_SIGNATURE signature) { return IsSigInILImpl(signature); }
-    DomainAssembly * LoadAssembly(mdAssemblyRef kAssemblyRef)
+    Assembly * LoadAssembly(mdAssemblyRef kAssemblyRef)
     {
         WRAPPER_NO_CONTRACT;
         return LoadAssemblyImpl(kAssemblyRef);
     }
 
     // Resolving
-    OBJECTHANDLE ResolveStringRef(DWORD Token, void** ppPinnedString = nullptr);
+    STRINGREF* ResolveStringRef(DWORD Token, void** ppPinnedString = nullptr);
 private:
     // string helper
     void InitializeStringData(DWORD token, EEStringData *pstrData, CQuickBytes *pqb);
@@ -606,7 +608,6 @@ class Module : public ModuleBase
 {
 #ifdef DACCESS_COMPILE
     friend class ClrDataAccess;
-    friend class NativeImageDumper;
 #endif
 
     friend class DataImage;
@@ -614,16 +615,19 @@ class Module : public ModuleBase
     VPTR_VTABLE_CLASS(Module, ModuleBase)
 
 private:
-    PTR_CUTF8               m_pSimpleName; // Cached simple name for better performance and easier diagnostics
+    PTR_CUTF8               m_pSimpleName;  // Cached simple name for better performance and easier diagnostics
+    const WCHAR*            m_path;         // Cached path for easier diagnostics
+    const WCHAR*            m_fileName;     // Cached file name for easier diagnostics
 
     PTR_PEAssembly          m_pPEAssembly;
     PTR_VOID                m_baseAddress; // Cached base address for easier diagnostics
 
     enum {
         // These are the values set in m_dwTransientFlags.
+        // [cDAC] [Loader]: Contract depends on the values of MODULE_IS_TENURED, IS_EDIT_AND_CONTINUE, IS_REFLECTION_EMIT, IS_JIT_OPTIMIZATION_DISABLED, IS_ENC_CAPABLE, PROF_DISABLE_OPTIMIZATIONS, DEBUGGER_INFO_MASK_PRIV, DEBUGGER_INFO_SHIFT_PRIV.
 
         MODULE_IS_TENURED           = 0x00000001,   // Set once we know for sure the Module will not be freed until the appdomain itself exits
-        // unused                   = 0x00000002,
+        IS_JIT_OPTIMIZATION_DISABLED= 0x00000002,   // Cached result: JIT optimizations are disabled for this module (by debugger or profiler)
         CLASSES_FREED               = 0x00000004,
         IS_EDIT_AND_CONTINUE        = 0x00000008,   // is EnC Enabled for this module
 
@@ -631,13 +635,17 @@ private:
         IS_ETW_NOTIFIED             = 0x00000020,
 
         IS_REFLECTION_EMIT          = 0x00000040,
+        PROF_DISABLE_OPTIMIZATIONS  = 0x00000080,   // indicates if Profiler disabled JIT optimization event mask was set when loaded
+        PROF_DISABLE_INLINING       = 0x00000100,   // indicates if Profiler disabled JIT Inlining event mask was set when loaded
+
+        IS_ENC_CAPABLE              = 0x00000200,   // Cached result of IsEditAndContinueCapable() at Module creation
 
         //
         // Note: The values below must match the ones defined in
         // cordbpriv.h for DebuggerAssemblyControlFlags when shifted
         // right DEBUGGER_INFO_SHIFT bits.
         //
-        DEBUGGER_USER_OVERRIDE_PRIV = 0x00000400,
+        // DEBUGGER_USER_OVERRIDE_PRIV was 0x00000400.  Deprecated.
         DEBUGGER_ALLOW_JIT_OPTS_PRIV= 0x00000800,
         DEBUGGER_TRACK_JIT_INFO_PRIV= 0x00001000,
         DEBUGGER_ENC_ENABLED_PRIV   = 0x00002000,   // this is what was attempted to be set.  IS_EDIT_AND_CONTINUE is actual result.
@@ -651,12 +659,11 @@ private:
         IS_BEING_UNLOADED           = 0x00100000,
     };
 
-    static_assert_no_msg(DEBUGGER_USER_OVERRIDE_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_USER_OVERRIDE);
-    static_assert_no_msg(DEBUGGER_ALLOW_JIT_OPTS_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_ALLOW_JIT_OPTS);
-    static_assert_no_msg(DEBUGGER_TRACK_JIT_INFO_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_OBSOLETE_TRACK_JIT_INFO);
-    static_assert_no_msg(DEBUGGER_ENC_ENABLED_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_ENC_ENABLED);
-    static_assert_no_msg(DEBUGGER_PDBS_COPIED >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_PDBS_COPIED);
-    static_assert_no_msg(DEBUGGER_IGNORE_PDBS >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_IGNORE_PDBS);
+    static_assert(DEBUGGER_ALLOW_JIT_OPTS_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_ALLOW_JIT_OPTS);
+    static_assert(DEBUGGER_TRACK_JIT_INFO_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_OBSOLETE_TRACK_JIT_INFO);
+    static_assert(DEBUGGER_ENC_ENABLED_PRIV >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_ENC_ENABLED);
+    static_assert(DEBUGGER_PDBS_COPIED >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_PDBS_COPIED);
+    static_assert(DEBUGGER_IGNORE_PDBS >> DEBUGGER_INFO_SHIFT_PRIV == DebuggerAssemblyControlFlags::DACF_IGNORE_PDBS);
 
     enum {
         // These are the values set in m_dwPersistedFlags.
@@ -684,6 +691,8 @@ private:
         RUNTIME_MARSHALLING_ENABLED_IS_CACHED = 0x00008000,
         //If runtime marshalling is enabled for this assembly
         RUNTIME_MARSHALLING_ENABLED = 0x00010000,
+
+        SKIP_TYPE_VALIDATION = 0x00020000,
     };
 
     Volatile<DWORD>          m_dwTransientFlags;
@@ -738,15 +747,17 @@ private:
     // For generic methods, IsGenericTypeDefinition() is true i.e. instantiation at formals
     LookupMap<PTR_MethodDesc>       m_MethodDefToDescMap;
 
-    // Linear mapping from MethodDef token to ILCodeVersioningState *
-    // This is used for Code Versioning logic
-    LookupMap<PTR_ILCodeVersioningState>    m_ILCodeVersioningStateMap;
-
     // Linear mapping from FieldDef token to FieldDesc*
     LookupMap<PTR_FieldDesc>        m_FieldDefToDescMap;
 
     // Linear mapping from GenericParam token to TypeVarTypeDesc*
     LookupMap<PTR_TypeVarTypeDesc>  m_GenericParamToDescMap;
+
+#ifdef FEATURE_CODE_VERSIONING
+    // Linear mapping from MethodDef token to ILCodeVersioningState *
+    // This is used for Code Versioning logic
+    LookupMap<PTR_ILCodeVersioningState>    m_ILCodeVersioningStateMap;
+#endif // FEATURE_CODE_VERSIONING
 
     // IL stub cache with fabricated MethodTable parented by this module.
     ILStubCache                *m_pILStubCache;
@@ -818,6 +829,9 @@ private:
     // Set the given bit on m_dwTransientFlags. Return true if we won the race to set the bit.
     BOOL SetTransientFlagInterlocked(DWORD dwFlag);
 
+    // Set bits on the m_dwTransientFlags according to the given mask.
+    void SetTransientFlagInterlockedWithMask(DWORD dwFlag, DWORD dwMask);
+
     // Cannoically-cased hashtable of the available class names for
     // case insensitive lookup.  Contains pointers into
     // m_pAvailableClasses.
@@ -866,10 +880,13 @@ protected:
 #endif
 
     PTR_PEAssembly GetPEAssembly() const { LIMITED_METHOD_DAC_CONTRACT; return m_pPEAssembly; }
+    PTR_VOID GetModuleBaseAddress() const { LIMITED_METHOD_DAC_CONTRACT; return m_baseAddress; }
 
     void ApplyMetaData();
 
+#ifdef FEATURE_IJW
     void FixupVTables();
+#endif // FEATURE_IJW
 
     void FreeClassTables();
 
@@ -892,11 +909,8 @@ protected:
     MethodTable *GetGlobalMethodTable();
     bool         NeedsGlobalMethodTable();
 
-    DomainAssembly *GetDomainAssembly();
-
-    void SetDomainAssembly(DomainAssembly *pDomainAssembly);
-
     OBJECTREF GetExposedObject();
+    OBJECTREF GetExposedObjectIfExists();
 
     ClassLoader *GetClassLoader();
 #ifdef FEATURE_CODE_VERSIONING
@@ -905,8 +919,6 @@ protected:
 
     BOOL IsReflectionEmit() const { WRAPPER_NO_CONTRACT; SUPPORTS_DAC; return (m_dwTransientFlags & IS_REFLECTION_EMIT) != 0; }
     BOOL IsSystem() { WRAPPER_NO_CONTRACT; SUPPORTS_DAC; return m_pPEAssembly->IsSystem(); }
-    // Returns true iff the debugger can see this module.
-    BOOL IsVisibleToDebugger();
 
     virtual BOOL IsEditAndContinueCapable() const { return FALSE; }
 
@@ -916,6 +928,22 @@ protected:
         SUPPORTS_DAC;
         _ASSERTE((m_dwTransientFlags & IS_EDIT_AND_CONTINUE) == 0 || IsEditAndContinueCapable());
         return (m_dwTransientFlags & IS_EDIT_AND_CONTINUE) != 0;
+    }
+
+    BOOL IsInliningDisabledByProfiler() const
+    {
+        WRAPPER_NO_CONTRACT;
+        SUPPORTS_DAC;
+
+        return (m_dwTransientFlags & PROF_DISABLE_INLINING) != 0;
+    }
+
+    BOOL AreJITOptimizationsDisabled() const
+    {
+        LIMITED_METHOD_CONTRACT;
+        SUPPORTS_DAC;
+
+        return (m_dwTransientFlags & IS_JIT_OPTIMIZATION_DISABLED) != 0;
     }
 
 #ifdef FEATURE_METADATA_UPDATER
@@ -930,7 +958,18 @@ private:
         SUPPORTS_DAC;
         _ASSERTE(IsEditAndContinueCapable());
         LOG((LF_ENC, LL_INFO100, "M:EnableEditAndContinue: this:%p, %s\n", this, GetDebugName()));
-        m_dwTransientFlags |= IS_EDIT_AND_CONTINUE;
+        SetTransientFlagInterlocked(IS_EDIT_AND_CONTINUE);
+    }
+
+    // Recompute and cache the IS_JIT_OPTIMIZATION_DISABLED bit from the debugger and profiler source bits.
+    // Must be called after any change to DEBUGGER_ALLOW_JIT_OPTS_PRIV or PROF_DISABLE_OPTIMIZATIONS.
+    void UpdateJitOptimizationDisabledState()
+    {
+        LIMITED_METHOD_CONTRACT;
+
+        DWORD flags = m_dwTransientFlags;
+        bool disabled = !(flags & DEBUGGER_ALLOW_JIT_OPTS_PRIV) || (flags & PROF_DISABLE_OPTIMIZATIONS);
+        SetTransientFlagInterlockedWithMask(disabled ? IS_JIT_OPTIMIZATION_DISABLED : 0, IS_JIT_OPTIMIZATION_DISABLED);
     }
 
 public:
@@ -950,8 +989,6 @@ public:
 
 #ifndef DACCESS_COMPILE
     VOID EnsureActive();
-    VOID EnsureAllocated();
-    VOID EnsureLibraryLoaded();
 #endif
 
     CHECK CheckActivated();
@@ -1133,7 +1170,6 @@ public:
     Assembly * GetAssemblyIfLoaded(
             mdAssemblyRef       kAssemblyRef,
             IMDInternalImport * pMDImportOverride = NULL,
-            BOOL                fDoNotUtilizeExtraChecks = FALSE,
             AssemblyBinder      *pBinderForLoadedAssembly = NULL
             ) final;
 
@@ -1144,7 +1180,7 @@ protected:
                                                   UINT resIDWhy) final;
 #endif
 
-    DomainAssembly * LoadAssemblyImpl(mdAssemblyRef kAssemblyRef) final;
+    Assembly * LoadAssemblyImpl(mdAssemblyRef kAssemblyRef) final;
 public:
     PTR_Module LookupModule(mdToken kFile) final;
     Module *GetModuleIfLoaded(mdFile kFile) final;
@@ -1219,6 +1255,7 @@ public:
     }
 #endif // !DACCESS_COMPILE
 
+#ifdef FEATURE_CODE_VERSIONING
     PTR_ILCodeVersioningState LookupILCodeVersioningState(mdMethodDef token);
 
 #ifndef DACCESS_COMPILE
@@ -1237,6 +1274,7 @@ public:
         m_ILCodeVersioningStateMap.SetElement(RidFromToken(token), value);
     }
 #endif // !DACCESS_COMPILE
+#endif // FEATURE_CODE_VERSIONING
 
 #ifndef DACCESS_COMPILE
     FieldDesc *LookupFieldDef(mdFieldDef token)
@@ -1319,9 +1357,6 @@ public:
 
     mdAssemblyRef FindAssemblyRef(Assembly *targetAssembly);
 
-    void          CreateAssemblyRefByNameTable(AllocMemTracker *pamTracker);
-    bool          HasReferenceByName(LPCUTF8 pModuleName);
-
 #endif // !DACCESS_COMPILE
 
     DWORD GetAssemblyRefMax() {LIMITED_METHOD_CONTRACT;  return m_ManifestModuleReferencesMap.GetSize() - 1; }
@@ -1329,15 +1364,26 @@ public:
     MethodDesc *FindMethodThrowing(mdToken pMethod);
     MethodDesc *FindMethod(mdToken pMethod);
 
+#ifndef DACCESS_COMPILE
+public:
+    // light code gen. Keep the list of MethodTables needed for creating dynamic methods
+    DynamicMethodTable* GetDynamicMethodTable();
+#endif
+private:
+    // m_pDynamicMethodTable is used by the light code generation to allow method
+    // generation on the fly. They are lazily created when/if a dynamic method is requested
+    // for this specific module
+    DynamicMethodTable*         m_pDynamicMethodTable;
+
 public:
 
     // Debugger stuff
-    BOOL NotifyDebuggerLoad(AppDomain *pDomain, DomainAssembly * pDomainAssembly, int level, BOOL attaching);
-    void NotifyDebuggerUnload(AppDomain *pDomain);
+    BOOL NotifyDebuggerLoad(Assembly * pAssembly, int level, BOOL attaching);
+    void NotifyDebuggerUnload();
 
     void SetDebuggerInfoBits(DebuggerAssemblyControlFlags newBits);
 
-    DebuggerAssemblyControlFlags GetDebuggerInfoBits(void)
+    DebuggerAssemblyControlFlags GetDebuggerInfoBits(void) const
     {
         LIMITED_METHOD_CONTRACT;
         SUPPORTS_DAC;
@@ -1384,13 +1430,19 @@ public:
     }
 
     HRESULT GetScopeName(LPCUTF8 * pszName) { WRAPPER_NO_CONTRACT; return m_pPEAssembly->GetScopeName(pszName); }
-    const SString &GetPath() { WRAPPER_NO_CONTRACT; return m_pPEAssembly->GetPath(); }
+    const SString &GetPath()
+    {
+        WRAPPER_NO_CONTRACT;
+        // Validate the pointers are the same to ensure the lifetime of m_path is handled.
+        _ASSERTE(m_path == m_pPEAssembly->GetPath().GetUnicode());
+        return m_pPEAssembly->GetPath();
+    }
 
 #ifdef LOGGING
     LPCUTF8 GetDebugName() { WRAPPER_NO_CONTRACT; return m_pPEAssembly->GetDebugName(); }
 #endif
 
-    PEImageLayout * GetReadyToRunImage();
+    ReadyToRunLoadedImage * GetReadyToRunImage();
     PTR_READYTORUN_IMPORT_SECTION GetImportSections(COUNT_T *pCount);
     PTR_READYTORUN_IMPORT_SECTION GetImportSectionFromIndex(COUNT_T index);
     PTR_READYTORUN_IMPORT_SECTION GetImportSectionForRVA(RVA rva);
@@ -1425,17 +1477,17 @@ public:
     IMDInternalImport *GetNativeAssemblyImport(BOOL loadAllowed = TRUE);
     IMDInternalImport *GetNativeAssemblyImportIfLoaded();
 
-    BOOL FixupNativeEntry(READYTORUN_IMPORT_SECTION * pSection, SIZE_T fixupIndex, SIZE_T *fixup, BOOL mayUsePrecompiledNDirectMethods = TRUE);
+    BOOL FixupNativeEntry(READYTORUN_IMPORT_SECTION * pSection, SIZE_T fixupIndex, SIZE_T *fixup, BOOL mayUsePrecompiledPInvokeMethods = TRUE);
 
     //this split exists to support new CLR Dump functionality in DAC.  The
     //template removes any indirections.
-    BOOL FixupDelayList(TADDR pFixupList, BOOL mayUsePrecompiledNDirectMethods = TRUE);
+    BOOL FixupDelayList(TADDR pFixupList, BOOL mayUsePrecompiledPInvokeMethods = TRUE);
 
     template<typename Ptr, typename FixupNativeEntryCallback>
     BOOL FixupDelayListAux(TADDR pFixupList,
                            Ptr pThis, FixupNativeEntryCallback pfnCB,
                            PTR_READYTORUN_IMPORT_SECTION pImportSections, COUNT_T nImportSections,
-                           PEDecoder * pNativeImage, BOOL mayUsePrecompiledNDirectMethods = TRUE);
+                           ReadyToRunLoadedImage * pNativeImage, BOOL mayUsePrecompiledPInvokeMethods = TRUE);
     void RunEagerFixups();
     void RunEagerFixupsUnlocked();
 
@@ -1453,6 +1505,12 @@ public:
 #endif
     }
 
+    bool SkipTypeValidation() const
+    {
+        LIMITED_METHOD_DAC_CONTRACT;
+
+        return (m_dwPersistedFlags & SKIP_TYPE_VALIDATION) != 0;
+    }
 #ifdef FEATURE_READYTORUN
     PTR_ReadyToRunInfo GetReadyToRunInfo() const
     {
@@ -1476,13 +1534,25 @@ public:
     BOOL IsIJWFixedUp() { return m_dwTransientFlags & IS_IJW_FIXED_UP; }
     void SetIsIJWFixedUp();
 
+    static bool HasAnyIJWBeenLoaded();
+
     BOOL IsBeingUnloaded() { return m_dwTransientFlags & IS_BEING_UNLOADED; }
     void   SetBeingUnloaded();
     void   StartUnload();
 
 public:
+#ifndef DACCESS_COMPILE
     void SetDynamicIL(mdToken token, TADDR blobAddress);
+#endif // !DACCESS_COMPILE
     TADDR GetDynamicIL(mdToken token);
+
+protected:
+#ifndef DACCESS_COMPILE
+    void SetDynamicRvaField(mdToken token, TADDR blobAddress);
+#endif // !DACCESS_COMPILE
+
+public:
+    TADDR GetDynamicRvaField(mdToken token);
 
     // store and retrieve the instrumented IL offset mapping for a particular method
 #if !defined(DACCESS_COMPILE)
@@ -1491,20 +1561,10 @@ public:
     InstrumentedILOffsetMapping GetInstrumentedILOffsetMapping(mdMethodDef token);
 
 public:
-    // LoaderHeap for storing IJW thunks
-    PTR_LoaderHeap           m_pThunkHeap;
-
-    // Self-initializing accessor for IJW thunk heap
-    LoaderHeap              *GetThunkHeap();
-    // Self-initializing accessor for domain-independent IJW thunk heap
-    LoaderHeap              *GetDllThunkHeap();
-
     const ReadyToRun_MethodIsGenericMap *m_pMethodIsGenericMap = &ReadyToRun_MethodIsGenericMap::EmptyInstance;
     const ReadyToRun_TypeGenericInfoMap *m_pTypeGenericInfoMap = &ReadyToRun_TypeGenericInfoMap::EmptyInstance;
 
 protected:
-
-    PTR_DomainAssembly      m_pDomainAssembly;
 
 public:
     //-----------------------------------------------------------------------------------------
@@ -1519,6 +1579,8 @@ public:
     // words, they become compliant
     //-----------------------------------------------------------------------------------------
     BOOL                    IsRuntimeWrapExceptions();
+    void                    UpdateCachedIsRuntimeWrapExceptions();
+    BOOL                    IsRuntimeWrapExceptionsDuringEH();
 
     //-----------------------------------------------------------------------------------------
     // If true, the built-in runtime-generated marshalling subsystem will be used for
@@ -1531,6 +1593,16 @@ public:
         LIMITED_METHOD_CONTRACT;
         return (m_dwPersistedFlags & RUNTIME_MARSHALLING_ENABLED_IS_CACHED);
     }
+
+protected:
+    // For reflection emit modules we set this flag when we emit the attribute, and always consider
+    // the current setting of the flag to be set.
+    void SetIsRuntimeWrapExceptionsCached_ForReflectionEmitModules()
+    {
+        LIMITED_METHOD_CONTRACT;
+        m_dwPersistedFlags = m_dwPersistedFlags | COMPUTED_WRAP_EXCEPTIONS;
+    }
+public:
 
     BOOL                    HasDefaultDllImportSearchPathsAttribute();
 
@@ -1588,12 +1660,8 @@ private:
     PTR_JITInlineTrackingMap m_pJitInlinerTrackingMap;
 #endif // defined(PROFILING_SUPPORTED) || defined(PROFILING_SUPPORTED_DATA)
 
-
-    LPCSTR               *m_AssemblyRefByNameTable;  // array that maps mdAssemblyRef tokens into their simple name
-    DWORD                 m_AssemblyRefByNameCount;  // array size
-
     // a.dll calls a method in b.dll and that method call a method in c.dll. When ngening
-    // a.dll it is possible then method in b.dll can be inlined. When that happens a.ni.dll stores
+    // a.dll it is possible then method in b.dll can be inlined. When that happens a.dll R2R image stores
     // an added native metadata which has information about assemblyRef to c.dll
     // Now due to facades, this scenario is very common. This led to lots of calls to
     // binder to get the module corresponding to assemblyRef in native metadata.
@@ -1601,6 +1669,8 @@ private:
     // is not called for each fixup
 
     PTR_Assembly           *m_NativeMetadataAssemblyRefMap;
+
+    LOADERHANDLE m_hExposedObject;
 
     // Buffer of Metadata storage for dynamic modules. May be NULL. This provides a reasonable way for
     // the debugger to get metadata of dynamic modules from out of process.
@@ -1610,6 +1680,10 @@ private:
     // Starting at the address of the second uint32_t value is the saved metadata itself
 protected:
     TADDR m_pDynamicMetadata;
+
+    // Incremented each time a module's metadata is updated.
+    // Indicates update to out-of-process readers.
+    uint32_t m_dwMetadataGeneration;
 
 public:
 #if !defined(DACCESS_COMPILE)
@@ -1629,26 +1703,39 @@ public:
     uint32_t GetNativeMetadataAssemblyCount();
 #endif // !defined(DACCESS_COMPILE)
 
-    template<typename T> friend struct ::cdac_offsets;
+    friend struct ::cdac_data<Module>;
 };
 
 template<>
-struct cdac_offsets<Module>
+struct cdac_data<Module>
 {
     static constexpr size_t Assembly = offsetof(Module, m_pAssembly);
+    static constexpr size_t PEAssembly = offsetof(Module, m_pPEAssembly);
     static constexpr size_t Base = offsetof(Module, m_baseAddress);
     static constexpr size_t Flags = offsetof(Module, m_dwTransientFlags);
     static constexpr size_t LoaderAllocator = offsetof(Module, m_loaderAllocator);
-    static constexpr size_t ThunkHeap = offsetof(Module, m_pThunkHeap);
     static constexpr size_t DynamicMetadata = offsetof(Module, m_pDynamicMetadata);
+    static constexpr size_t MetadataGeneration = offsetof(Module, m_dwMetadataGeneration);
+    static constexpr size_t SimpleName = offsetof(Module, m_pSimpleName);
+    static constexpr size_t Path = offsetof(Module, m_path);
+    static constexpr size_t FileName = offsetof(Module, m_fileName);
+    static constexpr size_t ReadyToRunInfo = offsetof(Module, m_pReadyToRunInfo);
+    static constexpr size_t GrowableSymbolStream = offsetof(Module, m_pIStreamSym);
 
     // Lookup map pointers
-    static constexpr size_t FieldDefToDescMap = offsetof(Module, m_FieldDefToDescMap) + offsetof(LookupMap<PTR_FieldDesc>, pTable);
-    static constexpr size_t ManifestModuleReferencesMap = offsetof(Module, m_ManifestModuleReferencesMap) + offsetof(LookupMap<PTR_Module>, pTable);
-    static constexpr size_t MemberRefToDescMap = offsetof(Module, m_MemberRefMap) + offsetof(LookupMap<TADDR>, pTable);
-    static constexpr size_t MethodDefToDescMap = offsetof(Module, m_MethodDefToDescMap) + offsetof(LookupMap<PTR_MethodDesc>, pTable);
-    static constexpr size_t TypeDefToMethodTableMap = offsetof(Module, m_TypeDefToMethodTableMap) + offsetof(LookupMap<PTR_MethodTable>, pTable);
-    static constexpr size_t TypeRefToMethodTableMap = offsetof(Module, m_TypeRefToMethodTableMap) + offsetof(LookupMap<PTR_TypeRef>, pTable);
+    static constexpr size_t FieldDefToDescMap = offsetof(Module, m_FieldDefToDescMap);
+    static constexpr size_t ManifestModuleReferencesMap = offsetof(Module, m_ManifestModuleReferencesMap);
+    static constexpr size_t MemberRefToDescMap = offsetof(Module, m_MemberRefMap);
+    static constexpr size_t MethodDefToDescMap = offsetof(Module, m_MethodDefToDescMap);
+    static constexpr size_t TypeDefToMethodTableMap = offsetof(Module, m_TypeDefToMethodTableMap);
+    static constexpr size_t TypeRefToMethodTableMap = offsetof(Module, m_TypeRefToMethodTableMap);
+#ifdef FEATURE_CODE_VERSIONING
+    static constexpr size_t MethodDefToILCodeVersioningStateMap = offsetof(Module, m_ILCodeVersioningStateMap);
+#endif // FEATURE_CODE_VERSIONING
+    static constexpr size_t DynamicILBlobTable = offsetof(Module, m_debuggerSpecificData.m_pDynamicILBlobTable);
+#ifdef FEATURE_METADATA_UPDATER
+    static constexpr size_t EnCClassList = offsetof(Module, m_ClassList);
+#endif // FEATURE_METADATA_UPDATER
 };
 
 //
@@ -1705,27 +1792,37 @@ public:
     void CaptureModuleMetaDataToMemory();
 };
 
-// Module holders
-FORCEINLINE void VoidModuleDestruct(Module *pModule)
+struct ModuleHolderTraits final
 {
+    using Type = Module*;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type pModule)
+    {
+        STATIC_CONTRACT_WRAPPER;
 #ifndef DACCESS_COMPILE
-    if (g_fEEStarted)
-        pModule->Destruct();
+        if (g_fEEStarted && pModule != NULL)
+            pModule->Destruct();
 #endif
-}
+    }
+};
 
-typedef Wrapper<Module*, DoNothing, VoidModuleDestruct, 0> ModuleHolder;
+using ModuleHolder = LifetimeHolder<ModuleHolderTraits>;
 
-
-
-FORCEINLINE void VoidReflectionModuleDestruct(ReflectionModule *pModule)
+struct ReflectionModuleHolderTraits final
 {
+    using Type = ReflectionModule*;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type pModule)
+    {
+        STATIC_CONTRACT_WRAPPER;
 #ifndef DACCESS_COMPILE
-    pModule->Destruct();
+        if (pModule != NULL)
+            pModule->Destruct();
 #endif
-}
+    }
+};
 
-typedef Wrapper<ReflectionModule*, DoNothing, VoidReflectionModuleDestruct, 0> ReflectionModuleHolder;
+using ReflectionModuleHolder = LifetimeHolder<ReflectionModuleHolderTraits>;
 
 
 

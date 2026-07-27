@@ -64,7 +64,6 @@ namespace System.IO.Tests
         }
 
         [ConditionalFact(typeof(MountHelper), nameof(MountHelper.CanCreateSymbolicLinks))]
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/103584", TestPlatforms.Windows)]
         public void FileSystemWatcher_Directory_Delete_SymLink()
         {
             string dir = CreateTestDirectory(TestDirectory, "dir");
@@ -99,6 +98,18 @@ namespace System.IO.Tests
                 ExpectEvent(watcher, WatcherChangeTypes.Deleted, action, cleanup, dirName);
                 Assert.True(invoker.BeginInvoke_Called);
             }
+        }
+
+        [Fact]
+        public void FileSystemWatcher_WatchedDirectory_Delete()
+        {
+            string dir = CreateTestDirectory(TestDirectory, "watched");
+            using var watcher = new FileSystemWatcher(dir);
+
+            Action action = () => Directory.Delete(dir, recursive: true);
+            Action cleanup = () => Directory.CreateDirectory(dir);
+
+            ExpectError(watcher, action, cleanup);
         }
     }
 }

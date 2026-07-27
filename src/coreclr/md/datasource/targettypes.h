@@ -292,6 +292,7 @@ public:
     BYTE m_bSortable[TBL_COUNT];
     CORDB_ADDRESS dbg_m_pLock;
     BOOL m_fMinimalDelta;
+    BOOL m_fAll4ByteColumns;
     CORDB_ADDRESS m_rENCRecs;
 };
 
@@ -322,8 +323,6 @@ public:
     CORDB_ADDRESS m_pNextStgdb;
     ULONG32 m_eFileType;
     CORDB_ADDRESS m_wszFileName;
-    ULONG32 m_dwDatabaseLFT;
-    ULONG32 m_dwDatabaseLFS;
     CORDB_ADDRESS m_pStgIO;
 };
 

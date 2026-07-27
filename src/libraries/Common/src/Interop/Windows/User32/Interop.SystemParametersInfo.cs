@@ -11,9 +11,11 @@ internal static partial class Interop
         public enum SystemParametersAction : uint
         {
             SPI_GETICONTITLELOGFONT = 0x1F,
-            SPI_GETNONCLIENTMETRICS = 0x29
+            SPI_GETNONCLIENTMETRICS = 0x29,
+            SPI_GETHIGHCONTRAST = 0x42
         }
 
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [LibraryImport(Libraries.User32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static unsafe partial bool SystemParametersInfoW(SystemParametersAction uiAction, uint uiParam, void* pvParam, uint fWinIni);

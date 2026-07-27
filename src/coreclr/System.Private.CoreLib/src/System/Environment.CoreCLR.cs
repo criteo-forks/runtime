@@ -12,10 +12,10 @@ namespace System
 {
     public static partial class Environment
     {
-        public static extern int CurrentManagedThreadId
+        public static int CurrentManagedThreadId
         {
-            [MethodImpl(MethodImplOptions.InternalCall)]
-            get;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Threading.ManagedThreadId.Current;
         }
 
         // Terminates this process with the given exit code.
@@ -103,26 +103,86 @@ namespace System
             return mainMethodArgs;
         }
 
-        [LibraryImport(RuntimeHelpers.QCall, EntryPoint = "Environment_GetProcessorCount")]
-        private static partial int GetProcessorCount();
-
-        // Used by VM
-        internal static string? GetResourceStringLocal(string key) => SR.GetResourceString(key);
-
-        /// <summary>Gets the number of milliseconds elapsed since the system started.</summary>
-        /// <value>A 32-bit signed integer containing the amount of time in milliseconds that has passed since the last time the computer was started.</value>
-        public static extern int TickCount
+        [UnmanagedCallersOnly]
+        private static unsafe void InitializeCommandLineArgs(char* exePath, int argc, char** argv, string[]* pResult, Exception* pException)
         {
-            [MethodImpl(MethodImplOptions.InternalCall)]
-            get;
+            try
+            {
+                *pResult = InitializeCommandLineArgs(exePath, argc, argv);
+            }
+            catch (Exception ex)
+            {
+                *pException = ex;
+            }
         }
 
-        /// <summary>Gets the number of milliseconds elapsed since the system started.</summary>
-        /// <value>A 64-bit signed integer containing the amount of time in milliseconds that has passed since the last time the computer was started.</value>
-        public static extern long TickCount64
+        [LibraryImport(RuntimeHelpers.QCall, EntryPoint = "Environment_GetProcessorCount")]
+        internal static partial int GetProcessorCount();
+
+        [UnmanagedCallersOnly]
+        private static unsafe void GetResourceString(char* pKey, string* pResult, Exception* pException)
         {
-            [MethodImpl(MethodImplOptions.InternalCall)]
-            get;
+            try
+            {
+                *pResult = SR.GetResourceString(new string(pKey));
+            }
+            catch (Exception ex)
+            {
+                *pException = ex;
+            }
+        }
+
+        [UnmanagedCallersOnly]
+        [StackTraceHidden]
+        [DebuggerHidden]
+        internal static unsafe void CallEntryPoint(IntPtr entryPoint, string[]* pArgument, int* pReturnValue, bool captureException, Exception* pException)
+        {
+            try
+            {
+                if (pArgument is not null)
+                {
+                    string[]? argument = *pArgument;
+
+                    if (pReturnValue is not null)
+                    {
+                        *pReturnValue = ((delegate*<string[]?, int>)entryPoint)(argument);
+                    }
+                    else
+                    {
+                        ((delegate*<string[]?, void>)entryPoint)(argument);
+                    }
+                }
+                else
+                {
+                    if (pReturnValue is not null)
+                    {
+                        *pReturnValue = ((delegate*<int>)entryPoint)();
+                    }
+                    else
+                    {
+                        ((delegate*<void>)entryPoint)();
+                    }
+                }
+            }
+            catch (Exception ex) when (captureException)
+            {
+                *pException = ex;
+            }
+        }
+
+        [UnmanagedCallersOnly]
+        [StackTraceHidden]
+        internal static unsafe int ExecuteInDefaultAppDomain(IntPtr entryPoint, char* pArgument, Exception* pException)
+        {
+            try
+            {
+                return ((delegate*<string?, int>)entryPoint)(pArgument is not null ? new string(pArgument) : null);
+            }
+            catch (Exception ex)
+            {
+                *pException = ex;
+                return default;
+            }
         }
     }
 }

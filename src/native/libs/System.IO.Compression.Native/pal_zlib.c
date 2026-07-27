@@ -8,10 +8,12 @@
 #ifdef _WIN32
     #define c_static_assert(e) static_assert((e),"")
     #include "../Common/pal_utilities.h"
+    #if _WIN64
+        #include <zlib_allocator.h>
+    #endif
 #else
     #include "pal_utilities.h"
 #endif
-#include <zlib_allocator.h>
 #include <zlib.h>
 
 c_static_assert(PAL_Z_NOFLUSH == Z_NO_FLUSH);
@@ -40,8 +42,10 @@ static int32_t Init(PAL_ZStream* stream)
 {
     z_stream* zStream = (z_stream*)calloc(1, sizeof(z_stream));
 
+#ifdef _WIN64
     zStream->zalloc = z_custom_calloc;
     zStream->zfree = z_custom_cfree;
+#endif
 
     stream->internalState = zStream;
 
@@ -185,11 +189,29 @@ int32_t CompressionNative_InflateEnd(PAL_ZStream* stream)
     return result;
 }
 
+int32_t CompressionNative_InflateReset2_(PAL_ZStream* stream, int32_t windowBits)
+{
+    assert(stream != NULL);
+
+    z_stream* zStream = GetCurrentZStream(stream);
+    int32_t result = inflateReset2(zStream, windowBits);
+    TransferStateToPalZStream(zStream, stream);
+
+    return result;
+}
+
 uint32_t CompressionNative_Crc32(uint32_t crc, uint8_t* buffer, int32_t len)
 {
     assert(buffer != NULL);
 
     unsigned long result = crc32(crc, buffer, len);
+    assert(result <= UINT32_MAX);
+    return (uint32_t)result;
+}
+
+uint32_t CompressionNative_CompressBound(uint32_t sourceLen)
+{
+    unsigned long result = compressBound(sourceLen);
     assert(result <= UINT32_MAX);
     return (uint32_t)result;
 }

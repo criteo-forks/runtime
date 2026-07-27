@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace System.Threading
 {
@@ -26,6 +27,7 @@ namespace System.Threading
 #endif
         }
 
+        [FeatureSwitchDefinition("System.Threading.Thread.EnableAutoreleasePool")]
         public static bool EnableAutoreleasePool { get; } = CheckEnableAutoreleasePool();
 
         [ThreadStatic]
@@ -49,5 +51,33 @@ namespace System.Threading
                 s_AutoreleasePoolInstance = IntPtr.Zero;
             }
         }
+
+#if CORECLR
+        [System.Runtime.InteropServices.UnmanagedCallersOnly]
+        private static unsafe void CreateAutoreleasePool(Exception* pException)
+        {
+            try
+            {
+                CreateAutoreleasePool();
+            }
+            catch (Exception ex)
+            {
+                *pException = ex;
+            }
+        }
+
+        [System.Runtime.InteropServices.UnmanagedCallersOnly]
+        private static unsafe void DrainAutoreleasePool(Exception* pException)
+        {
+            try
+            {
+                DrainAutoreleasePool();
+            }
+            catch (Exception ex)
+            {
+                *pException = ex;
+            }
+        }
+#endif
     }
 }

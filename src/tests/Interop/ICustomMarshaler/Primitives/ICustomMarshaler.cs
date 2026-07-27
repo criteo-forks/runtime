@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 using static TestLibrary.Utilities;
+using TestLibrary;
 
 namespace System.Runtime.InteropServices.Tests
 {
@@ -40,7 +41,7 @@ namespace System.Runtime.InteropServices.Tests
             public static ICustomMarshaler GetInstance(string cookie) => new StringForwardingCustomMarshaler();
         }
 
-        [DllImport(LibcLibrary, EntryPoint = "atoi")]
+        [DllImport(LibcLibrary, EntryPoint = "atoi", CallingConvention = CallingConvention.Cdecl)]
         public static extern int MarshalerOnStringTypeMethod([MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(StringForwardingCustomMarshaler))] string str);
 
         public static void CustomMarshaler_ArrayType_Success()
@@ -62,7 +63,7 @@ namespace System.Runtime.InteropServices.Tests
             public static ICustomMarshaler GetInstance(string cookie) => new ArrayForwardingCustomMarshaler();
         }
 
-        [DllImport(LibcLibrary, EntryPoint = "atoi")]
+        [DllImport(LibcLibrary, EntryPoint = "atoi", CallingConvention = CallingConvention.Cdecl)]
         public static extern int MarshalerOnArrayTypeMethod([MarshalAs(UnmanagedType.CustomMarshaler, MarshalType = "System.Runtime.InteropServices.Tests.ICustomMarshalerTests+ArrayForwardingCustomMarshaler")] string[] str);
 
         public static void CustomMarshaler_BoxedValueType_Success()
@@ -89,7 +90,7 @@ namespace System.Runtime.InteropServices.Tests
             public static ICustomMarshaler GetInstance(string cookie) => new BoxedValueTypeCustomMarshaler();
         }
 
-        [DllImport(LibcLibrary, EntryPoint = "atoi")]
+        [DllImport(LibcLibrary, EntryPoint = "atoi", CallingConvention = CallingConvention.Cdecl)]
         public static extern int MarshalerOnBoxedValueTypeMethod([MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(BoxedValueTypeCustomMarshaler))] object i);
 
         public static void Parameter_CustomMarshalerProvidedOnClassType_ForwardsCorrectly()
@@ -687,6 +688,7 @@ namespace System.Runtime.InteropServices.Tests
         {
             Assert.Throws<MarshalDirectiveException>(() => CustomMarshallerWithDelegateRef(84664, (ref int x) => x.ToString()));
         }
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/34374", TestRuntimes.Mono)]
         [Fact]
         public static int TestEntryPoint()
         {
@@ -719,9 +721,8 @@ namespace System.Runtime.InteropServices.Tests
                 Parameter_CleanUpNativeDataMethodThrows_ThrowsActualException();
                 Field_ParentIsStruct_ThrowsTypeLoadException();
                 Parameter_DifferentCustomMarshalerType_MarshalsCorrectly();
-                if (SupportsExceptionInterop)
+                if (TestLibrary.PlatformDetection.IsExceptionInteropSupported)
                 {
-                    // EH interop is not supported for NativeAOT.
                     DelegateParameter_MarshalerOnRefInt_ThrowsMarshalDirectiveException();
                 }
             }

@@ -33,16 +33,46 @@ function set_env_vars()
         export SDK_HAS_WORKLOAD_INSTALLED=false
     fi
 
-    if [ "x$TEST_USING_WEBCIL" = "xfalse" ]; then
+    if [ "x$WASM_ENABLE_WEBCIL" = "xfalse" ]; then
         export USE_WEBCIL_FOR_TESTS=false
     else
         export USE_WEBCIL_FOR_TESTS=true
     fi
 
-    if [ "x$TEST_USING_FINGERPRINTING" = "xfalse" ]; then
+    if [ "x$WASM_FINGERPRINT_ASSETS" = "xfalse" ]; then
         export USE_FINGERPRINTING_FOR_TESTS=false
     else
         export USE_FINGERPRINTING_FOR_TESTS=true
+    fi
+
+    if [ "x$WASM_BUNDLER_FRIENDLY_BOOT_CONFIG" = "xtrue" ]; then
+        export USE_JAVASCRIPT_BUNDLER_FOR_TESTS=true
+    else
+        export USE_JAVASCRIPT_BUNDLER_FOR_TESTS=false
+    fi
+
+    if [[ -n "$RUNTIME_FLAVOR" ]]; then
+        export RUNTIME_FLAVOR_FOR_TESTS=$RUNTIME_FLAVOR
+    fi
+
+    # CoreCLR WBT: make payload-relative paths visible to any child process that calls this helper.
+    if [[ -n "$REPOSITORY_ENGINEERING_DIR" ]]; then
+        export REPOSITORY_ENGINEERING_DIR
+    fi
+    if [[ -n "$BROWSER_BUILD_TARGETS_DIR" ]]; then
+        export BROWSER_BUILD_TARGETS_DIR
+    fi
+    if [[ -n "$WASM_APP_BUILDER_TASKS_ASSEMBLY_PATH" ]]; then
+        export WASM_APP_BUILDER_TASKS_ASSEMBLY_PATH
+    fi
+    if [[ -n "$EMSDK_PATH" ]]; then
+        export EMSDK_PATH
+    fi
+    if [[ -n "$MINIPAL_INCLUDE_DIR" ]]; then
+        export MINIPAL_INCLUDE_DIR
+    fi
+    if [[ -n "$CORECLR_VM_WASM_INCLUDE_DIR" ]]; then
+        export CORECLR_VM_WASM_INCLUDE_DIR
     fi
 
     local _SDK_DIR=

@@ -7,9 +7,8 @@
 #include "gcinterface.dac.h"
 #include "rhassert.h"
 #include "TargetPtrs.h"
-#include "varint.h"
-#include "PalRedhawkCommon.h"
-#include "PalRedhawk.h"
+#include "PalLimitedContext.h"
+#include "Pal.h"
 #include "holder.h"
 #include "RuntimeInstance.h"
 #include "regdisplay.h"
@@ -77,7 +76,13 @@ struct DotNetRuntimeDebugHeader
     // This counter can be incremented to indicate breaking changes
     // This field must be encoded little endian, regardless of the typical endianness of
     // the machine
-    const uint16_t MajorVersion = 4;
+    // Changes:
+    //  v1-v4 were never doc'ed but history is source control if you need it
+    //  v5 - Thread now has an m_eeAllocContext field and the previous m_rgbAllocContextBuffer
+    //       field is nested inside of it.
+    //  v6 - Removed RuntimeInstance.m_pThreadStore field, added g_pThreadStore global.
+    //
+    const uint16_t MajorVersion = 6;
 
     // This counter can be incremented to indicate back-compatible changes
     // This field must be encoded little endian, regardless of the typical endianness of
@@ -163,6 +168,9 @@ extern "C" void PopulateDebugHeaders()
     MAKE_DEBUG_FIELD_ENTRY(dac_gc_heap, finalize_queue);
     MAKE_DEBUG_FIELD_ENTRY(dac_gc_heap, generation_table);
 
+    MAKE_SIZE_ENTRY(ee_alloc_context);
+    MAKE_DEBUG_FIELD_ENTRY(ee_alloc_context, m_rgbAllocContextBuffer);
+
     MAKE_SIZE_ENTRY(gc_alloc_context);
     MAKE_DEBUG_FIELD_ENTRY(gc_alloc_context, alloc_ptr);
     MAKE_DEBUG_FIELD_ENTRY(gc_alloc_context, alloc_limit);
@@ -194,7 +202,7 @@ extern "C" void PopulateDebugHeaders()
 
     MAKE_SIZE_ENTRY(RuntimeThreadLocals);
     MAKE_DEBUG_FIELD_ENTRY(RuntimeThreadLocals, m_pNext);
-    MAKE_DEBUG_FIELD_ENTRY(RuntimeThreadLocals, m_rgbAllocContextBuffer);
+    MAKE_DEBUG_FIELD_ENTRY(RuntimeThreadLocals, m_eeAllocContext);
     MAKE_DEBUG_FIELD_ENTRY(RuntimeThreadLocals, m_threadId);
     MAKE_DEBUG_FIELD_ENTRY(RuntimeThreadLocals, m_pThreadStressLog);
     MAKE_DEBUG_FIELD_ENTRY(RuntimeThreadLocals, m_pExInfoStackHead);
@@ -248,13 +256,10 @@ extern "C" void PopulateDebugHeaders()
     MAKE_SIZE_ENTRY(StressMsg);
     MAKE_DEBUG_FIELD_ENTRY(StressMsg, args);
 
-    MAKE_SIZE_ENTRY(RuntimeInstance);
-    MAKE_DEBUG_FIELD_ENTRY(RuntimeInstance, m_pThreadStore);
-
     MAKE_GLOBAL_ENTRY(g_CrashInfoBuffer);
 
-    RuntimeInstance *g_pTheRuntimeInstance = GetRuntimeInstance();
-    MAKE_GLOBAL_ENTRY(g_pTheRuntimeInstance);
+    ThreadStore *g_pThreadStore = ThreadStore::s_pThreadStore;
+    MAKE_GLOBAL_ENTRY(g_pThreadStore);
 
     MAKE_GLOBAL_ENTRY(g_gcDacGlobals);
 

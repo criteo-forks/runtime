@@ -26,40 +26,41 @@ namespace Microsoft.Interop
 
         public ImmutableArray<CatchClauseSyntax> ManagedExceptionCatchClauses { get; init; }
 
-        public static GeneratedStatements Create(BoundGenerators marshallers, StubCodeContext context)
+        public static GeneratedStatements Create(BoundGenerators marshallers, StubIdentifierContext context)
         {
             return new GeneratedStatements
             {
-                Setup = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.Setup }),
-                Marshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.Marshal }),
-                Pin = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.Pin }).Cast<FixedStatementSyntax>().ToImmutableArray(),
-                PinnedMarshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.PinnedMarshal }),
+                Setup = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Setup }),
+                Marshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Marshal }),
+                Pin = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Pin }).Cast<FixedStatementSyntax>().ToImmutableArray(),
+                PinnedMarshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.PinnedMarshal }),
                 InvokeStatement = EmptyStatement(),
-                Unmarshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.UnmarshalCapture })
-                            .AddRange(GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.Unmarshal })),
-                NotifyForSuccessfulInvoke = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.NotifyForSuccessfulInvoke }),
-                GuaranteedUnmarshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.GuaranteedUnmarshal }),
-                CleanupCallerAllocated = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.CleanupCallerAllocated }),
-                CleanupCalleeAllocated = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubCodeContext.Stage.CleanupCalleeAllocated }),
+                Unmarshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.UnmarshalCapture })
+                            .AddRange(GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Unmarshal })),
+                NotifyForSuccessfulInvoke = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.NotifyForSuccessfulInvoke }),
+                GuaranteedUnmarshal = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.GuaranteedUnmarshal }),
+                CleanupCallerAllocated = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.CleanupCallerAllocated }),
+                CleanupCalleeAllocated = GenerateStatementsForStubContext(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.CleanupCalleeAllocated }),
                 ManagedExceptionCatchClauses = GenerateCatchClauseForManagedException(marshallers, context)
             };
         }
-        public static GeneratedStatements Create(BoundGenerators marshallers, StubCodeContext context, ExpressionSyntax expressionToInvoke)
+
+        public static GeneratedStatements Create(BoundGenerators marshallers, StubCodeContext codeContext, StubIdentifierContext context, ExpressionSyntax expressionToInvoke)
         {
             GeneratedStatements statements = Create(marshallers, context);
 
-            if (context.Direction == MarshalDirection.ManagedToUnmanaged)
+            if (codeContext.Direction == MarshalDirection.ManagedToUnmanaged)
             {
                 return statements with
                 {
-                    InvokeStatement = GenerateStatementForNativeInvoke(marshallers, context with { CurrentStage = StubCodeContext.Stage.Invoke }, expressionToInvoke)
+                    InvokeStatement = GenerateStatementForNativeInvoke(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Invoke }, expressionToInvoke)
                 };
             }
-            else if (context.Direction == MarshalDirection.UnmanagedToManaged)
+            else if (codeContext.Direction == MarshalDirection.UnmanagedToManaged)
             {
                 return statements with
                 {
-                    InvokeStatement = GenerateStatementForManagedInvoke(marshallers, context with { CurrentStage = StubCodeContext.Stage.Invoke }, expressionToInvoke)
+                    InvokeStatement = GenerateStatementForManagedInvoke(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Invoke }, expressionToInvoke)
                 };
             }
             else
@@ -68,12 +69,33 @@ namespace Microsoft.Interop
             }
         }
 
-        private static ImmutableArray<StatementSyntax> GenerateStatementsForStubContext(BoundGenerators marshallers, StubCodeContext context)
+        /// <summary>
+        /// Create the standard set of generated statements for an unmanaged-to-managed stub whose
+        /// managed-side invocation is a property or indexer accessor. For a getter the body assigns the
+        /// read expression into the return identifier (<c>__retVal = propertyAccess</c>); for a setter
+        /// it assigns the value parameter into the access expression (<c>propertyAccess = value</c>).
+        /// </summary>
+        /// <remarks>
+        /// For indexers the caller is expected to bake the index arguments into
+        /// <paramref name="propertyAccess"/> (as an <c>ElementAccessExpression</c>) before passing it in;
+        /// the value parameter — which is the LAST entry in <c>ManagedParameterMarshallers</c> for both
+        /// property and indexer setters — is consumed here.
+        /// </remarks>
+        public static GeneratedStatements CreateForProperty(BoundGenerators marshallers, StubIdentifierContext context, ExpressionSyntax propertyAccess, bool isSetter)
+        {
+            GeneratedStatements statements = Create(marshallers, context);
+            return statements with
+            {
+                InvokeStatement = GenerateStatementForProperty(marshallers, context with { CurrentStage = StubIdentifierContext.Stage.Invoke }, propertyAccess, isSetter)
+            };
+        }
+
+        private static ImmutableArray<StatementSyntax> GenerateStatementsForStubContext(BoundGenerators marshallers, StubIdentifierContext context)
         {
             ImmutableArray<StatementSyntax>.Builder statementsToUpdate = ImmutableArray.CreateBuilder<StatementSyntax>();
-            foreach (BoundGenerator marshaller in marshallers.SignatureMarshallers)
+            foreach (IBoundMarshallingGenerator marshaller in marshallers.SignatureMarshallers)
             {
-                statementsToUpdate.AddRange(marshaller.Generator.Generate(marshaller.TypeInfo, context));
+                statementsToUpdate.AddRange(marshaller.Generate(context));
             }
 
             if (statementsToUpdate.Count > 0)
@@ -87,18 +109,18 @@ namespace Microsoft.Interop
             return statementsToUpdate.ToImmutable();
         }
 
-        private static ExpressionStatementSyntax GenerateStatementForNativeInvoke(BoundGenerators marshallers, StubCodeContext context, ExpressionSyntax expressionToInvoke)
+        private static ExpressionStatementSyntax GenerateStatementForNativeInvoke(BoundGenerators marshallers, StubIdentifierContext context, ExpressionSyntax expressionToInvoke)
         {
-            if (context.CurrentStage != StubCodeContext.Stage.Invoke)
+            if (context.CurrentStage != StubIdentifierContext.Stage.Invoke)
             {
                 throw new ArgumentException("CurrentStage must be Invoke");
             }
             InvocationExpressionSyntax invoke = InvocationExpression(expressionToInvoke);
             // Generate code for each parameter for the current stage
-            foreach (BoundGenerator marshaller in marshallers.NativeParameterMarshallers)
+            foreach (IBoundMarshallingGenerator marshaller in marshallers.NativeParameterMarshallers)
             {
                 // Get arguments for invocation
-                ArgumentSyntax argSyntax = marshaller.Generator.AsArgument(marshaller.TypeInfo, context);
+                ArgumentSyntax argSyntax = marshaller.AsArgument(context);
                 invoke = invoke.AddArgumentListArguments(argSyntax);
             }
             // Assign to return value if necessary
@@ -109,7 +131,7 @@ namespace Microsoft.Interop
 
             var (managed, native) = context.GetIdentifiers(marshallers.NativeReturnMarshaller.TypeInfo);
 
-            string targetIdentifier = marshallers.NativeReturnMarshaller.Generator.UsesNativeIdentifier(marshallers.NativeReturnMarshaller.TypeInfo, context)
+            string targetIdentifier = marshallers.NativeReturnMarshaller.UsesNativeIdentifier
                 ? native
                 : managed;
 
@@ -121,18 +143,18 @@ namespace Microsoft.Interop
         }
 
 
-        private static ExpressionStatementSyntax GenerateStatementForManagedInvoke(BoundGenerators marshallers, StubCodeContext context, ExpressionSyntax expressionToInvoke)
+        private static ExpressionStatementSyntax GenerateStatementForManagedInvoke(BoundGenerators marshallers, StubIdentifierContext context, ExpressionSyntax expressionToInvoke)
         {
-            if (context.CurrentStage != StubCodeContext.Stage.Invoke)
+            if (context.CurrentStage != StubIdentifierContext.Stage.Invoke)
             {
                 throw new ArgumentException("CurrentStage must be Invoke");
             }
             InvocationExpressionSyntax invoke = InvocationExpression(expressionToInvoke);
             // Generate code for each parameter for the current stage
-            foreach (BoundGenerator marshaller in marshallers.ManagedParameterMarshallers)
+            foreach (IBoundMarshallingGenerator marshaller in marshallers.ManagedParameterMarshallers)
             {
                 // Get arguments for invocation
-                ArgumentSyntax argSyntax = marshaller.Generator.AsManagedArgument(marshaller.TypeInfo, context);
+                ArgumentSyntax argSyntax = marshaller.AsManagedArgument(context);
                 invoke = invoke.AddArgumentListArguments(argSyntax);
             }
             // Assign to return value if necessary
@@ -148,7 +170,40 @@ namespace Microsoft.Interop
                         invoke));
         }
 
-        private static ImmutableArray<CatchClauseSyntax> GenerateCatchClauseForManagedException(BoundGenerators marshallers, StubCodeContext context)
+        private static ExpressionStatementSyntax GenerateStatementForProperty(BoundGenerators marshallers, StubIdentifierContext context, ExpressionSyntax propertyAccess, bool isSetter)
+        {
+            if (context.CurrentStage != StubIdentifierContext.Stage.Invoke)
+            {
+                throw new ArgumentException("CurrentStage must be Invoke");
+            }
+
+            if (isSetter)
+            {
+                // Setter: assign the value parameter into the access expression.
+                //   propertyAccess = <managedValueIdentifier>;
+                //
+                // For property setters the only managed parameter IS the value parameter, so .Last() is
+                // identical to .Single(). For indexer setters the value parameter is appended LAST after
+                // the index parameters (Roslyn convention), so .Last() correctly picks it out.
+                IBoundMarshallingGenerator valueParameterMarshaller = marshallers.ManagedParameterMarshallers.Last();
+                ExpressionSyntax valueExpression = valueParameterMarshaller.AsManagedArgument(context).Expression;
+                return ExpressionStatement(
+                    AssignmentExpression(
+                        SyntaxKind.SimpleAssignmentExpression,
+                        propertyAccess,
+                        valueExpression));
+            }
+
+            // Getter: assign the property read into the managed return identifier.
+            //   <managedReturnIdentifier> = propertyAccess;
+            return ExpressionStatement(
+                AssignmentExpression(
+                    SyntaxKind.SimpleAssignmentExpression,
+                    IdentifierName(context.GetIdentifiers(marshallers.ManagedReturnMarshaller.TypeInfo).managed),
+                    propertyAccess));
+        }
+
+        private static ImmutableArray<CatchClauseSyntax> GenerateCatchClauseForManagedException(BoundGenerators marshallers, StubIdentifierContext context)
         {
             if (!marshallers.HasManagedExceptionMarshaller)
             {
@@ -156,16 +211,14 @@ namespace Microsoft.Interop
             }
             ImmutableArray<StatementSyntax>.Builder catchClauseBuilder = ImmutableArray.CreateBuilder<StatementSyntax>();
 
-            BoundGenerator managedExceptionMarshaller = marshallers.ManagedExceptionMarshaller;
+            IBoundMarshallingGenerator managedExceptionMarshaller = marshallers.ManagedExceptionMarshaller;
 
             var (managed, _) = context.GetIdentifiers(managedExceptionMarshaller.TypeInfo);
 
             catchClauseBuilder.AddRange(
-                managedExceptionMarshaller.Generator.Generate(
-                    managedExceptionMarshaller.TypeInfo, context with { CurrentStage = StubCodeContext.Stage.Marshal }));
+                managedExceptionMarshaller.Generate(context with { CurrentStage = StubIdentifierContext.Stage.Marshal }));
             catchClauseBuilder.AddRange(
-                managedExceptionMarshaller.Generator.Generate(
-                    managedExceptionMarshaller.TypeInfo, context with { CurrentStage = StubCodeContext.Stage.PinnedMarshal }));
+                managedExceptionMarshaller.Generate(context with { CurrentStage = StubIdentifierContext.Stage.PinnedMarshal }));
             return ImmutableArray.Create(
                 CatchClause(
                     CatchDeclaration(TypeSyntaxes.System_Exception, Identifier(managed)),
@@ -173,21 +226,21 @@ namespace Microsoft.Interop
                     Block(List(catchClauseBuilder))));
         }
 
-        private static SyntaxTriviaList GenerateStageTrivia(StubCodeContext.Stage stage)
+        private static SyntaxTriviaList GenerateStageTrivia(StubIdentifierContext.Stage stage)
         {
             string comment = stage switch
             {
-                StubCodeContext.Stage.Setup => "Perform required setup.",
-                StubCodeContext.Stage.Marshal => "Convert managed data to native data.",
-                StubCodeContext.Stage.Pin => "Pin data in preparation for calling the P/Invoke.",
-                StubCodeContext.Stage.PinnedMarshal => "Convert managed data to native data that requires the managed data to be pinned.",
-                StubCodeContext.Stage.Invoke => "Call the P/Invoke.",
-                StubCodeContext.Stage.UnmarshalCapture => "Capture the native data into marshaller instances in case conversion to managed data throws an exception.",
-                StubCodeContext.Stage.Unmarshal => "Convert native data to managed data.",
-                StubCodeContext.Stage.CleanupCallerAllocated => "Perform cleanup of caller allocated resources.",
-                StubCodeContext.Stage.CleanupCalleeAllocated => "Perform cleanup of callee allocated resources.",
-                StubCodeContext.Stage.NotifyForSuccessfulInvoke => "Keep alive any managed objects that need to stay alive across the call.",
-                StubCodeContext.Stage.GuaranteedUnmarshal => "Convert native data to managed data even in the case of an exception during the non-cleanup phases.",
+                StubIdentifierContext.Stage.Setup => "Perform required setup.",
+                StubIdentifierContext.Stage.Marshal => "Convert managed data to native data.",
+                StubIdentifierContext.Stage.Pin => "Pin data in preparation for calling the P/Invoke.",
+                StubIdentifierContext.Stage.PinnedMarshal => "Convert managed data to native data that requires the managed data to be pinned.",
+                StubIdentifierContext.Stage.Invoke => "Call the P/Invoke.",
+                StubIdentifierContext.Stage.UnmarshalCapture => "Capture the native data into marshaller instances in case conversion to managed data throws an exception.",
+                StubIdentifierContext.Stage.Unmarshal => "Convert native data to managed data.",
+                StubIdentifierContext.Stage.CleanupCallerAllocated => "Perform cleanup of caller allocated resources.",
+                StubIdentifierContext.Stage.CleanupCalleeAllocated => "Perform cleanup of callee allocated resources.",
+                StubIdentifierContext.Stage.NotifyForSuccessfulInvoke => "Keep alive any managed objects that need to stay alive across the call.",
+                StubIdentifierContext.Stage.GuaranteedUnmarshal => "Convert native data to managed data even in the case of an exception during the non-cleanup phases.",
                 _ => throw new ArgumentOutOfRangeException(nameof(stage))
             };
 

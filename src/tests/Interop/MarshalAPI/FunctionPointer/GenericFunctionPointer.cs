@@ -15,7 +15,7 @@ public partial class FunctionPtr
     {
         return Convert.ToInt32(arg);
     }
-    
+
     [UnmanagedCallersOnly]
     static BlittableGeneric<int> UnmanagedExportedFunctionBlittableGenericInt(float arg)
     {
@@ -50,6 +50,11 @@ public partial class FunctionPtr
         {
             ((delegate* unmanaged<ref int, float, void>)fnptr)(ref val, arg);
         }
+
+        internal static unsafe int NonGenericCalliInNonGenericMethod(void* fnptr, float arg)
+        {
+            return ((delegate* unmanaged<float, int>)fnptr)(arg);
+        }
     }
 
     struct BlittableGeneric<T>
@@ -63,6 +68,7 @@ public partial class FunctionPtr
     [InlineData(-1f)]
     [InlineData(42f)]
     [InlineData(60f)]
+    [Xunit.SkipOnCoreClrAttribute("Depends on marshalled calli", RuntimeTestModes.InterpreterActive)]
     public static void RunGenericFunctionPointerTest(float inVal)
     {
         Console.WriteLine($"Running {nameof(RunGenericFunctionPointerTest)}...");
@@ -75,7 +81,7 @@ public partial class FunctionPtr
             outVar = GenericCaller<int>.GenericCalli((delegate* unmanaged<float, int>)&UnmanagedExportedFunction, inVal);
         }
         Assert.Equal(expectedValue, outVar);
-        
+
         outVar = 0;
         Console.WriteLine("Testing GenericCalli with BlittableGeneric<int> as the return type");
         unsafe
@@ -99,9 +105,16 @@ public partial class FunctionPtr
             GenericCaller<string>.NonGenericCalli<string>((delegate* unmanaged<int*, float, void>)&UnmanagedExportedFunctionRefInt, ref outVar, inVal);
         }
         Assert.Equal(expectedValue, outVar);
+
+        unsafe
+        {
+            outVar = GenericCaller<string>.NonGenericCalliInNonGenericMethod((delegate* unmanaged<float, int>)&UnmanagedExportedFunction, inVal);
+        }
+        Assert.Equal(expectedValue, outVar);
     }
 
-    [ConditionalFact(nameof(CanRunInvalidGenericFunctionPointerTest))]
+    [ConditionalFact(typeof(FunctionPtr), nameof(CanRunInvalidGenericFunctionPointerTest))]
+    [Xunit.SkipOnCoreClrAttribute("Depends on marshalled calli", RuntimeTestModes.InterpreterActive)]
     public static void RunInvalidGenericFunctionPointerTest()
     {
         Console.WriteLine($"Running {nameof(RunInvalidGenericFunctionPointerTest)}...");

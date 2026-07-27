@@ -88,7 +88,7 @@ namespace System.Runtime.Serialization
         /// Transforms the specified set of schema types contained in an <see cref="XmlSchemaSet"/> into CLR types generated into a <see cref="System.CodeDom.CodeCompileUnit"/>.
         /// </summary>
         /// <param name="schemas">A <see cref="XmlSchemaSet"/> that contains the schema representations.</param>
-        /// <param name="typeNames">A <see cref="ICollection{T}"/> (of <see cref="XmlQualifiedName"/>) that represents the set of schema types to import.</param>
+        /// <param name="typeNames">The set of schema types to import.</param>
         [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
         public void Import(XmlSchemaSet schemas, ICollection<XmlQualifiedName> typeNames)
         {
@@ -145,7 +145,7 @@ namespace System.Runtime.Serialization
         /// Gets a value that indicates whether the schemas contained in an <see cref="XmlSchemaSet"/> can be transformed into a <see cref="System.CodeDom.CodeCompileUnit"/>.
         /// </summary>
         /// <param name="schemas">A <see cref="XmlSchemaSet"/> that contains the schemas to transform.</param>
-        /// <returns>true if the schemas can be transformed to data contract types; otherwise, false.</returns>
+        /// <returns><see langword="true" /> if the schemas can be transformed to data contract types; otherwise, <see langword="false" />.</returns>
         [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
         public bool CanImport(XmlSchemaSet schemas)
         {
@@ -158,9 +158,9 @@ namespace System.Runtime.Serialization
         /// <summary>
         /// Gets a value that indicates whether the specified set of types contained in an <see cref="XmlSchemaSet"/> can be transformed into CLR types generated into a <see cref="System.CodeDom.CodeCompileUnit"/>.
         /// </summary>
-        /// <param name="schemas">A <see cref="XmlSchemaSet"/> that contains the schemas to transform.</param>
-        /// <param name="typeNames">An <see cref="ICollection{T}"/> of <see cref="XmlQualifiedName"/> that represents the set of schema types to import.</param>
-        /// <returns>true if the schemas can be transformed; otherwise, false.</returns>
+        /// <param name="schemas">The schemas to transform.</param>
+        /// <param name="typeNames">The set of schema types to import.</param>
+        /// <returns><see langword="true" /> if the schemas can be transformed; otherwise, <see langword="false" />.</returns>
         [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
         public bool CanImport(XmlSchemaSet schemas, ICollection<XmlQualifiedName> typeNames)
         {
@@ -176,9 +176,9 @@ namespace System.Runtime.Serialization
         /// <summary>
         /// Gets a value that indicates whether the schemas contained in an <see cref="XmlSchemaSet"/> can be transformed into a <see cref="System.CodeDom.CodeCompileUnit"/>.
         /// </summary>
-        /// <param name="schemas">A <see cref="XmlSchemaSet"/> that contains the schema representations.</param>
-        /// <param name="typeName">An <see cref="XmlQualifiedName"/> that specifies the names of the schema types that need to be imported from the <see cref="XmlSchemaSet"/>.</param>
-        /// <returns>true if the schemas can be transformed to data contract types; otherwise, false.</returns>
+        /// <param name="schemas">The schema representations.</param>
+        /// <param name="typeName">The names of the schema types that need to be imported from the <see cref="XmlSchemaSet"/>.</param>
+        /// <returns><see langword="true" /> if the schemas can be transformed to data contract types; otherwise, <see langword="false" />.</returns>
         [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
         public bool CanImport(XmlSchemaSet schemas, XmlQualifiedName typeName)
         {
@@ -196,7 +196,7 @@ namespace System.Runtime.Serialization
         /// </summary>
         /// <param name="schemas">An <see cref="XmlSchemaSet"/> to import.</param>
         /// <param name="element">A specific <see cref="XmlSchemaElement"/> to check in the set of schemas.</param>
-        /// <returns>true if the element can be imported; otherwise, false.</returns>
+        /// <returns><see langword="true" /> if the element can be imported; otherwise, <see langword="false" />.</returns>
         [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
         public bool CanImport(XmlSchemaSet schemas, XmlSchemaElement element)
         {
@@ -297,6 +297,42 @@ namespace System.Runtime.Serialization
         }
 
         [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
+        private void CacheCollectionItemNullability(XmlSchemaSet schemas)
+        {
+            foreach (KeyValuePair<XmlQualifiedName, DataContract> pair in DataContractSet.Contracts)
+            {
+                DataContract dataContract = pair.Value;
+                if (!dataContract.Is(DataContractType.CollectionDataContract) ||
+                    !TryGetCollectionItemElement(schemas, pair.Key, out XmlSchemaElement? itemElement))
+                {
+                    continue;
+                }
+
+                if (!DataContractSet.ProcessedContracts.TryGetValue(dataContract, out object? info) ||
+                    info is not ContractCodeDomInfo contractCodeDomInfo)
+                {
+                    contractCodeDomInfo = new ContractCodeDomInfo();
+                    DataContractSet.ProcessedContracts[dataContract] = contractCodeDomInfo;
+                }
+
+                contractCodeDomInfo.CollectionItemIsNullable = itemElement.IsNillable;
+            }
+        }
+
+        private static bool TryGetCollectionItemElement(XmlSchemaSet schemas, XmlQualifiedName typeName, [NotNullWhen(true)] out XmlSchemaElement? itemElement)
+        {
+            itemElement = null;
+
+            if (schemas.GlobalTypes[typeName] is not XmlSchemaComplexType { Particle: XmlSchemaSequence rootSequence } || rootSequence.Items.Count != 1)
+            {
+                return false;
+            }
+
+            itemElement = rootSequence.Items[0] as XmlSchemaElement;
+            return itemElement != null;
+        }
+
+        [RequiresUnreferencedCode(ImportGlobals.SerializerTrimmerWarning)]
         private IList<XmlQualifiedName>? InternalImport(XmlSchemaSet schemas, ICollection<XmlQualifiedName>? typeNames, ICollection<XmlSchemaElement>? elements)
         {
             DataContractSet? oldValue = (_dataContractSet == null) ? null : new DataContractSet(_dataContractSet);
@@ -307,6 +343,8 @@ namespace System.Runtime.Serialization
                     elementTypeNames = DataContractSet.ImportSchemaSet(schemas, elements, ImportXmlDataType);
                 else
                     DataContractSet.ImportSchemaSet(schemas, typeNames, ImportXmlDataType);
+
+                CacheCollectionItemNullability(schemas);
 
                 CodeExporter codeExporter = new CodeExporter(DataContractSet, Options, CodeCompileUnit);
                 codeExporter.Export();
@@ -358,8 +396,7 @@ namespace System.Runtime.Serialization
             }
         }
 
-        private static XmlQualifiedName? s_actualTypeAnnotationName;
-        internal static XmlQualifiedName ActualTypeAnnotationName => s_actualTypeAnnotationName ??= new XmlQualifiedName(ImportGlobals.ActualTypeLocalName, ImportGlobals.SerializationNamespace);
+        internal static XmlQualifiedName ActualTypeAnnotationName => field ??= new XmlQualifiedName(ImportGlobals.ActualTypeLocalName, ImportGlobals.SerializationNamespace);
 
         internal static XmlQualifiedName ImportActualType(XmlSchemaAnnotation? annotation, XmlQualifiedName defaultTypeName, XmlQualifiedName typeName)
         {

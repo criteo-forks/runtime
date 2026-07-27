@@ -126,23 +126,6 @@ inline OBJECTHANDLE CreateRefcountedHandle(IGCHandleStore* store, OBJECTREF obje
     return CreateHandleCommon(store, object, HNDTYPE_REFCOUNTED);
 }
 
-inline OBJECTHANDLE CreateSizedRefHandle(IGCHandleStore* store, OBJECTREF object)
-{
-    return CreateHandleCommon(store, object, HNDTYPE_SIZEDREF);
-}
-
-inline OBJECTHANDLE CreateSizedRefHandle(IGCHandleStore* store, OBJECTREF object, int heapToAffinitizeTo)
-{
-    OBJECTHANDLE hnd = store->CreateHandleOfType(OBJECTREFToObject(object), HNDTYPE_SIZEDREF, heapToAffinitizeTo);
-    if (!hnd)
-    {
-        COMPlusThrowOM();
-    }
-
-    DiagHandleCreated(hnd, object);
-    return hnd;
-}
-
 inline OBJECTHANDLE CreateDependentHandle(IGCHandleStore* store, OBJECTREF primary, OBJECTREF secondary)
 {
     OBJECTHANDLE hnd = store->CreateDependentHandle(OBJECTREFToObject(primary), OBJECTREFToObject(secondary));
@@ -158,6 +141,18 @@ inline OBJECTHANDLE CreateDependentHandle(IGCHandleStore* store, OBJECTREF prima
 inline OBJECTHANDLE CreateWeakInteriorHandle(IGCHandleStore* store, OBJECTREF primary, void* interiorPointerLocation)
 {
     OBJECTHANDLE hnd = store->CreateHandleWithExtraInfo(OBJECTREFToObject(primary), HNDTYPE_WEAK_INTERIOR_POINTER, interiorPointerLocation);
+    if (!hnd)
+    {
+        COMPlusThrowOM();
+    }
+
+    DiagHandleCreated(hnd, primary);
+    return hnd;
+}
+
+inline OBJECTHANDLE CreateCrossReferenceHandle(IGCHandleStore* store, OBJECTREF primary, void* userContext)
+{
+    OBJECTHANDLE hnd = store->CreateHandleWithExtraInfo(OBJECTREFToObject(primary), HNDTYPE_CROSSREFERENCE, userContext);
     if (!hnd)
     {
         COMPlusThrowOM();
@@ -355,46 +350,39 @@ inline void DestroyTypedHandle(OBJECTHANDLE handle)
 // Handle holders/wrappers
 
 #ifndef FEATURE_NATIVEAOT
-typedef Wrapper<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyHandle>                   OHWrapper;
-typedef Wrapper<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyPinningHandle, 0>      PinningHandleHolder;
-typedef Wrapper<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyAsyncPinningHandle, 0> AsyncPinningHandleHolder;
-typedef Wrapper<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyRefcountedHandle>         RefCountedOHWrapper;
+struct OBJECTHANDLEHolderTraits final
+{
+    using Type = OBJECTHANDLE;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type handle)
+    {
+        WRAPPER_NO_CONTRACT;
+        if (handle != NULL)
+            DestroyHandle(handle);
+    }
+};
+
+using OBJECTHANDLEHolder = LifetimeHolder<OBJECTHANDLEHolderTraits>;
+
+struct PinningHandleHolderTraits final
+{
+    using Type = OBJECTHANDLE;
+    static constexpr Type Default() { return NULL; }
+    static void Free(Type handle)
+    {
+        WRAPPER_NO_CONTRACT;
+        if (handle != NULL)
+            DestroyPinningHandle(handle);
+    }
+};
+
+using PinningHandleHolder = LifetimeHolder<PinningHandleHolderTraits>;
 
 typedef Holder<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyLongWeakHandle>            LongWeakHandleHolder;
 typedef Holder<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyGlobalStrongHandle>        GlobalStrongHandleHolder;
 typedef Holder<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyGlobalShortWeakHandle>     GlobalShortWeakHandleHolder;
 typedef Holder<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, DestroyWeakInteriorHandle>        WeakInteriorHandleHolder;
 typedef Holder<OBJECTHANDLE, DoNothing<OBJECTHANDLE>, ResetOBJECTHANDLE>                ObjectInHandleHolder;
-
-class RCOBJECTHANDLEHolder : public RefCountedOHWrapper
-{
-public:
-    FORCEINLINE RCOBJECTHANDLEHolder(OBJECTHANDLE p = NULL) : RefCountedOHWrapper(p)
-    {
-        LIMITED_METHOD_CONTRACT;
-    }
-    FORCEINLINE void operator=(OBJECTHANDLE p)
-    {
-        WRAPPER_NO_CONTRACT;
-
-        RefCountedOHWrapper::operator=(p);
-    }
-};
-
-class OBJECTHANDLEHolder : public OHWrapper
-{
-public:
-    FORCEINLINE OBJECTHANDLEHolder(OBJECTHANDLE p = NULL) : OHWrapper(p)
-    {
-        LIMITED_METHOD_CONTRACT;
-    }
-    FORCEINLINE void operator=(OBJECTHANDLE p)
-    {
-        WRAPPER_NO_CONTRACT;
-
-        OHWrapper::operator=(p);
-    }
-};
 
 #endif // !FEATURE_NATIVEAOT
 

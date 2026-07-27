@@ -88,7 +88,7 @@ namespace System.Tests
 
         private class FinalizerTest
         {
-            [System.Runtime.CompilerServices.MethodImplAttribute(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+            [MethodImpl(MethodImplOptions.NoInlining)]
             private static void MakeAndDropTest()
             {
                 new TestObject();
@@ -145,7 +145,7 @@ namespace System.Tests
 
         private class KeepAliveTest
         {
-            [System.Runtime.CompilerServices.MethodImplAttribute(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+            [MethodImpl(MethodImplOptions.NoInlining)]
             private static void MakeAndDropDNKA()
             {
                 new DoNotKeepAliveObject();
@@ -195,7 +195,7 @@ namespace System.Tests
 
         private class KeepAliveNullTest
         {
-            [System.Runtime.CompilerServices.MethodImplAttribute(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+            [MethodImpl(MethodImplOptions.NoInlining)]
             private static void MakeAndNull()
             {
                 var obj = new TestObject();
@@ -294,7 +294,7 @@ namespace System.Tests
         }
 
         [OuterLoop]
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsPreciseGcSupported))]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsPreciseGcSupported), nameof(PlatformDetection.IsMultithreadingSupported))] // Races finalization across threads; meaningless on single-threaded platforms.
         public static void WaitForPendingFinalizersRaces()
         {
             Task.Run(Test);
@@ -373,6 +373,7 @@ namespace System.Tests
                 Assert.True(TestObject.Finalized);
             }
 
+            [MethodImpl(MethodImplOptions.NoInlining)]
             private static void CreateObject()
             {
                 using (var obj = new TestObject())
@@ -869,7 +870,7 @@ namespace System.Tests
         private static bool IsNotArmProcessAndRemoteExecutorSupported => PlatformDetection.IsNotArmProcess && RemoteExecutor.IsSupported;
 
         [ActiveIssue("https://github.com/dotnet/runtime/issues/73167", TestRuntimes.Mono)]
-        [ConditionalFact(nameof(IsNotArmProcessAndRemoteExecutorSupported))] // [ActiveIssue("https://github.com/dotnet/runtime/issues/29434")]
+        [ConditionalFact(typeof(GCExtendedTests), nameof(IsNotArmProcessAndRemoteExecutorSupported))] // [ActiveIssue("https://github.com/dotnet/runtime/issues/29434")]
         public static void GetGCMemoryInfo()
         {
             RemoteExecutor.Invoke(() =>

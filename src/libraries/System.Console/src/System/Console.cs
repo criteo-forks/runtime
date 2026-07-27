@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 
 namespace System
 {
@@ -392,42 +393,27 @@ namespace System
             set { ConsolePal.WindowTop = value; }
         }
 
-        [UnsupportedOSPlatform("android")]
-        [UnsupportedOSPlatform("browser")]
-        [UnsupportedOSPlatform("ios")]
-        [UnsupportedOSPlatform("tvos")]
         public static int WindowWidth
         {
+            [UnsupportedOSPlatform("android")]
+            [UnsupportedOSPlatform("browser")]
+            [UnsupportedOSPlatform("ios")]
+            [UnsupportedOSPlatform("tvos")]
             get { return ConsolePal.WindowWidth; }
-            set
-            {
-                if (Console.IsOutputRedirected)
-                {
-                    throw new IOException(SR.InvalidOperation_SetWindowSize);
-                }
-
-                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value, nameof(WindowWidth));
-
-                ConsolePal.WindowWidth = value;
-            }
+            [SupportedOSPlatform("windows")]
+            set { ConsolePal.WindowWidth = value; }
         }
 
-        [UnsupportedOSPlatform("android")]
-        [UnsupportedOSPlatform("browser")]
-        [UnsupportedOSPlatform("ios")]
-        [UnsupportedOSPlatform("tvos")]
         public static int WindowHeight
         {
+            [UnsupportedOSPlatform("android")]
+            [UnsupportedOSPlatform("browser")]
+            [UnsupportedOSPlatform("ios")]
+            [UnsupportedOSPlatform("tvos")]
             get { return ConsolePal.WindowHeight; }
+            [SupportedOSPlatform("windows")]
             set
             {
-                if (Console.IsOutputRedirected)
-                {
-                    throw new IOException(SR.InvalidOperation_SetWindowSize);
-                }
-
-                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value, nameof(WindowHeight));
-
                 ConsolePal.WindowHeight = value;
             }
         }
@@ -438,20 +424,9 @@ namespace System
             ConsolePal.SetWindowPosition(left, top);
         }
 
-        [UnsupportedOSPlatform("android")]
-        [UnsupportedOSPlatform("browser")]
-        [UnsupportedOSPlatform("ios")]
-        [UnsupportedOSPlatform("tvos")]
+        [SupportedOSPlatform("windows")]
         public static void SetWindowSize(int width, int height)
         {
-            if (Console.IsOutputRedirected)
-            {
-                throw new IOException(SR.InvalidOperation_SetWindowSize);
-            }
-
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width, nameof(width));
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height, nameof(height));
-
             ConsolePal.SetWindowSize(width, height);
         }
 
@@ -528,7 +503,8 @@ namespace System
             [UnsupportedOSPlatform("tvos")]
             set
             {
-                ConsolePal.Title = value ?? throw new ArgumentNullException(nameof(value));
+                ArgumentNullException.ThrowIfNull(value);
+                ConsolePal.Title = value;
             }
         }
 
@@ -675,6 +651,52 @@ namespace System
             // bufferSize is ignored, other than in argument validation, even in the .NET Framework
             ArgumentOutOfRangeException.ThrowIfNegative(bufferSize);
             return ConsolePal.OpenStandardError();
+        }
+
+        /// <summary>
+        /// Gets the standard input handle.
+        /// </summary>
+        /// <returns>A <see cref="SafeFileHandle"/> representing the standard input handle.</returns>
+        /// <remarks>
+        /// The returned handle does not own the underlying resource, so disposing it will not close the standard input handle.
+        /// </remarks>
+        [UnsupportedOSPlatform("android")]
+        [UnsupportedOSPlatform("browser")]
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("tvos")]
+        public static SafeFileHandle OpenStandardInputHandle()
+        {
+            return ConsolePal.OpenStandardInputHandle();
+        }
+
+        /// <summary>
+        /// Gets the standard output handle.
+        /// </summary>
+        /// <returns>A <see cref="SafeFileHandle"/> representing the standard output handle.</returns>
+        /// <remarks>
+        /// The returned handle does not own the underlying resource, so disposing it will not close the standard output handle.
+        /// </remarks>
+        [UnsupportedOSPlatform("android")]
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("tvos")]
+        public static SafeFileHandle OpenStandardOutputHandle()
+        {
+            return ConsolePal.OpenStandardOutputHandle();
+        }
+
+        /// <summary>
+        /// Gets the standard error handle.
+        /// </summary>
+        /// <returns>A <see cref="SafeFileHandle"/> representing the standard error handle.</returns>
+        /// <remarks>
+        /// The returned handle does not own the underlying resource, so disposing it will not close the standard error handle.
+        /// </remarks>
+        [UnsupportedOSPlatform("android")]
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("tvos")]
+        public static SafeFileHandle OpenStandardErrorHandle()
+        {
+            return ConsolePal.OpenStandardErrorHandle();
         }
 
         [UnsupportedOSPlatform("android")]
@@ -838,6 +860,16 @@ namespace System
             Out.WriteLine(value);
         }
 
+        /// <summary>
+        /// Writes the specified read-only span of characters, followed by the current line terminator, to the standard output stream.
+        /// </summary>
+        /// <param name="value">The span of characters to write.</param>
+        [MethodImplAttribute(MethodImplOptions.NoInlining)]
+        public static void WriteLine(ReadOnlySpan<char> value)
+        {
+            Out.WriteLine(value);
+        }
+
         [MethodImplAttribute(MethodImplOptions.NoInlining)]
         public static void WriteLine([StringSyntax(StringSyntaxAttribute.CompositeFormat)] string format, object? arg0)
         {
@@ -990,6 +1022,16 @@ namespace System
 
         [MethodImplAttribute(MethodImplOptions.NoInlining)]
         public static void Write(string? value)
+        {
+            Out.Write(value);
+        }
+
+        /// <summary>
+        /// Writes the specified read-only span of characters to the standard output stream.
+        /// </summary>
+        /// <param name="value">The span of characters to write.</param>
+        [MethodImplAttribute(MethodImplOptions.NoInlining)]
+        public static void Write(ReadOnlySpan<char> value)
         {
             Out.Write(value);
         }

@@ -91,6 +91,13 @@ BOOL TypeHandle::IsString() const
     return !IsTypeDesc() && AsMethodTable()->IsString();
 }
 
+BOOL TypeHandle::IsContinuationWithoutMetadata() const
+{
+    LIMITED_METHOD_CONTRACT;
+
+    return !IsTypeDesc() && AsMethodTable()->IsContinuationWithoutMetadata();
+}
+
 BOOL TypeHandle::IsGenericVariable() const {
     LIMITED_METHOD_DAC_CONTRACT;
 
@@ -108,33 +115,6 @@ BOOL TypeHandle::HasTypeParam() const {
 
     CorElementType etype = AsTypeDesc()->GetInternalCorElementType();
     return(CorTypeInfo::IsModifier_NoThrow(etype) || etype == ELEMENT_TYPE_VALUETYPE);
-}
-
-Module *TypeHandle::GetDefiningModuleForOpenType() const
-{
-    WRAPPER_NO_CONTRACT;
-    SUPPORTS_DAC;
-
-    Module* returnValue = NULL;
-
-    if (IsGenericVariable())
-    {
-        PTR_TypeVarTypeDesc pTyVar = dac_cast<PTR_TypeVarTypeDesc>(AsTypeDesc());
-        returnValue = pTyVar->GetModule();
-        goto Exit;
-    }
-
-    if (HasTypeParam())
-    {
-        returnValue = GetTypeParam().GetDefiningModuleForOpenType();
-    }
-    else if (HasInstantiation())
-    {
-        returnValue = GetMethodTable()->GetDefiningModuleForOpenType();
-    }
-Exit:
-
-    return returnValue;
 }
 
 BOOL TypeHandle::ContainsGenericVariables(BOOL methodOnly /*=FALSE*/) const
@@ -283,10 +263,7 @@ PTR_Module TypeHandle::GetLoaderModule() const
 
 PTR_LoaderAllocator TypeHandle::GetLoaderAllocator() const
 {
-    STATIC_CONTRACT_NOTHROW;
-    STATIC_CONTRACT_GC_NOTRIGGER;
-    STATIC_CONTRACT_FORBID_FAULT;
-    STATIC_CONTRACT_SUPPORTS_DAC;
+    LIMITED_METHOD_DAC_CONTRACT;
 
     if (IsTypeDesc())
     {
@@ -295,6 +272,20 @@ PTR_LoaderAllocator TypeHandle::GetLoaderAllocator() const
     else
     {
         return AsMethodTable()->GetLoaderAllocator();
+    }
+}
+
+bool TypeHandle::IsCollectible() const
+{
+    LIMITED_METHOD_DAC_CONTRACT;
+
+    if (IsTypeDesc())
+    {
+        return AsTypeDesc()->IsCollectible();
+    }
+    else
+    {
+        return AsMethodTable()->Collectible();
     }
 }
 
@@ -334,6 +325,20 @@ bool TypeHandle::IsManagedClassObjectPinned() const
 
 void TypeHandle::AllocateManagedClassObject(RUNTIMETYPEHANDLE* pDest)
 {
+    CONTRACTL
+    {
+        THROWS;
+        GC_TRIGGERS;
+        MODE_COOPERATIVE;
+    }
+    CONTRACTL_END
+
+    if (IsContinuationWithoutMetadata())
+    {
+        COMPlusThrow(kNotSupportedException, W("NotSupported_Continuation"));
+        return;
+    }
+
     REFLECTCLASSBASEREF refClass = NULL;
 
     PTR_LoaderAllocator allocator = GetLoaderAllocator();
@@ -342,7 +347,7 @@ void TypeHandle::AllocateManagedClassObject(RUNTIMETYPEHANDLE* pDest)
     {
         // Allocate RuntimeType on a frozen segment
         // Take a lock here since we don't want to allocate redundant objects which won't be collected
-        CrstHolder exposedClassLock(AppDomain::GetMethodTableExposedClassObjectLock());
+        CrstHolder exposedClassLock(AppDomain::GetCurrentDomain()->GetMethodTableExposedClassObjectLock());
 
         if (VolatileLoad(pDest) == 0)
         {
@@ -411,7 +416,7 @@ BOOL TypeHandle::IsInterface() const
 BOOL TypeHandle::IsAbstract() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->IsAbstract();
 }
 
@@ -449,6 +454,13 @@ bool TypeHandle::IsFloatHfa() const
         return false;
     }
     return (GetHFAType() == CORINFO_HFA_ELEM_FLOAT);
+}
+
+// Returns true when the type is Vector<T> or any instantiation thereof.
+bool TypeHandle::IsVectorT() const
+{
+    LIMITED_METHOD_CONTRACT;
+    return !IsTypeDesc() && AsMethodTable()->HasSameTypeDefAs(CoreLibBinder::GetClass(CLASS__VECTORT));
 }
 
 
@@ -502,42 +514,42 @@ BOOL TypeHandle::HasLayout() const
 TypeHandle TypeHandle::GetCoClassForInterface() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->GetCoClassForInterface();
 }
 
 DWORD TypeHandle::IsComClassInterface() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->IsComClassInterface();
 }
 
 BOOL TypeHandle::IsComObjectType() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->IsComObjectType();
 }
 
 BOOL TypeHandle::IsComEventItfType() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->IsComEventItfType();
 }
 
 CorIfaceAttr TypeHandle::GetComInterfaceType() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->GetComInterfaceType();
 }
 
 TypeHandle TypeHandle::GetDefItfForComClassItf() const
 {
     WRAPPER_NO_CONTRACT;
-    PREFIX_ASSUME(GetMethodTable() != NULL);
+    _ASSERTE(GetMethodTable() != NULL);
     return GetMethodTable()->GetDefItfForComClassItf();
 }
 
@@ -587,7 +599,7 @@ BOOL TypeHandle::IsBoxedAndCanCastTo(TypeHandle type, TypeHandlePairList *pPairL
     CONTRACTL_END
 
 
-    CorElementType fromParamCorType = GetVerifierCorElementType();
+    CorElementType fromParamCorType = GetInternalCorElementType();
 
     if (CorTypeInfo::IsObjRef(fromParamCorType))
     {
@@ -598,8 +610,8 @@ BOOL TypeHandle::IsBoxedAndCanCastTo(TypeHandle type, TypeHandlePairList *pPairL
     {
         TypeVarTypeDesc* varFromParam = AsGenericVariable();
 
-        if (!varFromParam->ConstraintsLoaded())
-            varFromParam->LoadConstraints(CLASS_DEPENDENCIES_LOADED);
+        if (!varFromParam->ConstraintsLoaded(WhichConstraintsToLoad::TypeOrMethodVarsAndNonInterfacesOnly))
+            varFromParam->LoadConstraints(CLASS_DEPENDENCIES_LOADED, WhichConstraintsToLoad::TypeOrMethodVarsAndNonInterfacesOnly);
 
         // A generic type parameter cannot be compatible with another type
         // as it could be substitued with a valuetype. However, if it is
@@ -966,17 +978,7 @@ TypeHandle TypeHandle::MergeArrayTypeHandlesToCommonParent(TypeHandle ta, TypeHa
         return TypeHandle(g_pArrayClass);
     }
 
-
-    {
-        // This should just result in resolving an already loaded type.
-        ENABLE_FORBID_GC_LOADER_USE_IN_THIS_SCOPE();
-        // == FailIfNotLoadedOrNotRestored
-        TypeHandle result = ClassLoader::LoadArrayTypeThrowing(tMergeElem, mergeKind, rank, ClassLoader::DontLoadTypes);
-        _ASSERTE(!result.IsNull());
-
-        // <TODO> should be able to assert IsRestored here </TODO>
-        return result;
-    }
+    return ClassLoader::LoadArrayTypeThrowing(tMergeElem, mergeKind, rank);
 }
 
 #endif // #ifndef DACCESS_COMPILE
@@ -1210,24 +1212,6 @@ CorElementType TypeHandle::GetSignatureCorElementType() const
     }
 }
 
-// As its name suggests, this returns the type used by the IL verifier. The basic difference between this
-// type and the type in the meta-data is that enumerations have been normalized to their underlieing
-// primitive type. see code:MethodTable#KindsOfElementTypes for more
-CorElementType TypeHandle::GetVerifierCorElementType() const
-{
-    LIMITED_METHOD_CONTRACT;
-
-    if (IsTypeDesc())
-    {
-        return AsTypeDesc()->GetInternalCorElementType();
-    }
-    else
-    {
-        return AsMethodTable()->GetVerifierCorElementType();
-    }
-}
-
-
 #ifdef DACCESS_COMPILE
 
 void
@@ -1398,8 +1382,6 @@ BOOL TypeHandle::SatisfiesClassConstraints() const
         _ASSERTE(tyvar != NULL);
         _ASSERTE(TypeFromToken(tyvar->GetTypeOrMethodDef()) == mdtTypeDef);
 
-        tyvar->LoadConstraints(); //TODO: is this necessary for anything but the typical class?
-
         if (!tyvar->SatisfiesConstraints(&typeContext, thArg))
         {
             return FALSE;
@@ -1538,7 +1520,7 @@ CHECK TypeHandle::CheckLoadLevel(ClassLoadLevel requiredLevel)
 {
     CHECK(!IsNull());
     //    CHECK_MSGF(!IsNull(), ("Type is null, required load level is %s", classLoadLevelName[requiredLevel]));
-    static_assert_no_msg(ARRAY_SIZE(classLoadLevelName) == (1 + CLASS_LOAD_LEVEL_FINAL));
+    static_assert(ARRAY_SIZE(classLoadLevelName) == (1 + CLASS_LOAD_LEVEL_FINAL));
 
     // Quick check to avoid creating debug string
     ClassLoadLevel actualLevel = GetLoadLevel();

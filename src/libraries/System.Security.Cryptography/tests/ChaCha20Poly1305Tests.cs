@@ -443,7 +443,7 @@ namespace System.Security.Cryptography.Tests
     {
         public static bool RuntimeSaysIsNotSupported => !ChaCha20Poly1305.IsSupported;
 
-        [ConditionalFact(nameof(RuntimeSaysIsNotSupported))]
+        [ConditionalFact(typeof(ChaCha20Poly1305IsSupportedTests), nameof(RuntimeSaysIsNotSupported))]
         public static void CtorThrowsPNSEIfNotSupported()
         {
             byte[] key = RandomNumberGenerator.GetBytes(256 / 8);
@@ -468,15 +468,16 @@ namespace System.Security.Cryptography.Tests
                 // Android with API Level 28 is the minimum API Level support for ChaChaPoly1305.
                 expectedIsSupported = OperatingSystem.IsAndroidVersionAtLeast(28);
             }
-            else if (PlatformDetection.IsMariner)
-            {
-                // OpenSSL is present, and a high enough version,
-                // but the distro build options turned off ChaCha/Poly.
-            }
             else if (PlatformDetection.IsOSX || PlatformDetection.UsesMobileAppleCrypto)
             {
                 // CryptoKit is supported on macOS 10.15+, which is our minimum target. On iOS/tvOS, it was added in 13.0 but we can expect that version in our testing environments.
                 expectedIsSupported = true;
+            }
+            else if (PlatformDetection.IsAzureLinux)
+            {
+                // Though Azure Linux uses OpenSSL, Azure Linux 3 built OpenSSL with ChaCha20Poly1305 disabled.
+                // It was re-enabled in Azure Linux 4.
+                expectedIsSupported = PlatformDetection.IsAzureLinux4OrHigher;
             }
             else if (PlatformDetection.OpenSslPresentOnSystem && PlatformDetection.IsOpenSslSupported)
             {

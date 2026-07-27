@@ -4,9 +4,11 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json.Serialization.Metadata;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace System.Text.Json.Serialization.Tests
@@ -36,7 +38,7 @@ namespace System.Text.Json.Serialization.Tests
         [InlineData(typeof(ClassWithParameterizedCtor))]
         [InlineData(typeof(ClassWithMultipleConstructors))]
         [InlineData(typeof(DerivedClassWithShadowingProperties))]
-        public void TypeWithConstructor_TypeInfoReportsExpectedCtorProvider(Type typeWithCtor)
+        public void TypeWithConstructor_TypeInfoReportsExpectedCtorProvider([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type typeWithCtor)
         {
             ConstructorInfo? expectedCtor = typeWithCtor.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
                 .OrderByDescending(ctor => ctor.GetCustomAttribute<JsonConstructorAttribute>() is not null)
@@ -55,7 +57,7 @@ namespace System.Text.Json.Serialization.Tests
         [InlineData(typeof(ClassWithParameterizedCtor))]
         [InlineData(typeof(ClassWithMultipleConstructors))]
         [InlineData(typeof(DerivedClassWithShadowingProperties))]
-        public void TypeWithConstructor_SettingCtorDelegate_ResetsCtorAttributeProvider(Type typeWithCtor)
+        public void TypeWithConstructor_SettingCtorDelegate_ResetsCtorAttributeProvider([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type typeWithCtor)
         {
             JsonTypeInfo typeInfo = Serializer.GetTypeInfo(typeWithCtor, mutable: true);
             Assert.NotNull(typeInfo.ConstructorAttributeProvider);
@@ -96,6 +98,7 @@ namespace System.Text.Json.Serialization.Tests
         [InlineData(typeof(ClassWithMultipleConstructors))]
         [InlineData(typeof(DerivedClassWithShadowingProperties))]
         [InlineData(typeof(IDerivedInterface))]
+        [RequiresUnreferencedCode("Uses reflection to resolve the member backing each JsonPropertyInfo.")]
         public void JsonPropertyInfo_AttributeProvider_HasExpectedValue(Type typeWithProperties)
         {
             JsonTypeInfo typeInfo = Serializer.GetTypeInfo(typeWithProperties);
@@ -128,7 +131,7 @@ namespace System.Text.Json.Serialization.Tests
         [InlineData(typeof(StructWithParameterizedCtor))]
         [InlineData(typeof(ClassWithMultipleConstructors))]
         [InlineData(typeof(DerivedClassWithShadowingProperties))]
-        public void TypeWithConstructor_JsonPropertyInfo_AssociatedParameter_MatchesCtorParams(Type typeWithCtor)
+        public void TypeWithConstructor_JsonPropertyInfo_AssociatedParameter_MatchesCtorParams([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type typeWithCtor)
         {
             ConstructorInfo? expectedCtor = typeWithCtor.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
                 .OrderByDescending(ctor => ctor.GetCustomAttribute<JsonConstructorAttribute>() is not null)
@@ -169,12 +172,10 @@ namespace System.Text.Json.Serialization.Tests
             Assert.Empty(parameters);
         }
 
-        [Theory]
-        [InlineData(typeof(ClassWithRequiredMember))]
-        [InlineData(typeof(ClassWithInitOnlyProperty))]
-        public void TypeWithRequiredOrInitMember_SourceGen_HasAssociatedParameterInfo(Type type)
+        [Fact]
+        public void TypeWithRequiredMember_SourceGen_HasAssociatedParameterInfo()
         {
-            JsonTypeInfo typeInfo = Serializer.GetTypeInfo(type);
+            JsonTypeInfo typeInfo = Serializer.GetTypeInfo(typeof(ClassWithRequiredMember));
             JsonPropertyInfo propertyInfo = typeInfo.Properties.Single();
 
             JsonParameterInfo? jsonParameter = propertyInfo.AssociatedParameter;
@@ -183,7 +184,7 @@ namespace System.Text.Json.Serialization.Tests
             {
                 Assert.NotNull(jsonParameter);
 
-                Assert.Equal(type, jsonParameter.DeclaringType);
+                Assert.Equal(typeof(ClassWithRequiredMember), jsonParameter.DeclaringType);
                 Assert.Equal(0, jsonParameter.Position);
                 Assert.Equal(propertyInfo.PropertyType, jsonParameter.ParameterType);
                 Assert.Equal(propertyInfo.Name, jsonParameter.Name);
@@ -200,6 +201,41 @@ namespace System.Text.Json.Serialization.Tests
             }
         }
 
+        [Fact]
+        public void TypeWithInitOnlyMember_SourceGen_HasNoAssociatedParameterInfo()
+        {
+            // Non-required init-only properties are no longer part of the constructor delegate
+            // in source gen. They are set post-construction via UnsafeAccessor or reflection.
+            JsonTypeInfo typeInfo = Serializer.GetTypeInfo(typeof(ClassWithInitOnlyProperty));
+            JsonPropertyInfo propertyInfo = typeInfo.Properties.Single();
+
+            JsonParameterInfo? jsonParameter = propertyInfo.AssociatedParameter;
+            Assert.Null(jsonParameter);
+        }
+
+        [Fact]
+        public void TypeWithInitOnlyAndRequiredMembers_OnlyRequiredHasAssociatedParameterInfo()
+        {
+            JsonTypeInfo typeInfo = Serializer.GetTypeInfo(typeof(ClassWithInitOnlyAndRequiredMembers));
+            Assert.Equal(2, typeInfo.Properties.Count);
+
+            JsonPropertyInfo initOnlyProp = typeInfo.Properties.Single(p => p.Name == nameof(ClassWithInitOnlyAndRequiredMembers.InitOnlyValue));
+            JsonPropertyInfo requiredProp = typeInfo.Properties.Single(p => p.Name == nameof(ClassWithInitOnlyAndRequiredMembers.RequiredValue));
+
+            Assert.Null(initOnlyProp.AssociatedParameter);
+
+            if (Serializer.IsSourceGeneratedSerializer)
+            {
+                Assert.NotNull(requiredProp.AssociatedParameter);
+                Assert.True(requiredProp.AssociatedParameter.IsMemberInitializer);
+                Assert.Equal(typeof(ClassWithInitOnlyAndRequiredMembers), requiredProp.AssociatedParameter.DeclaringType);
+            }
+            else
+            {
+                Assert.Null(requiredProp.AssociatedParameter);
+            }
+        }
+
         [Theory]
         [InlineData(typeof(ClassWithDefaultCtor))]
         [InlineData(typeof(StructWithDefaultCtor))]
@@ -209,7 +245,7 @@ namespace System.Text.Json.Serialization.Tests
         [InlineData(typeof(ClassWithInitOnlyProperty))]
         [InlineData(typeof(ClassWithMultipleConstructors))]
         [InlineData(typeof(DerivedClassWithShadowingProperties))]
-        public void TypeWithConstructor_SettingCtorDelegate_ResetsAssociatedParameters(Type typeWithCtor)
+        public void TypeWithConstructor_SettingCtorDelegate_ResetsAssociatedParameters([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type typeWithCtor)
         {
             JsonTypeInfo typeInfo = Serializer.GetTypeInfo(typeWithCtor, mutable: true);
             Assert.NotEmpty(typeInfo.Properties);
@@ -304,6 +340,61 @@ namespace System.Text.Json.Serialization.Tests
             });
         }
 
+        [Fact]
+        public async Task ClassWithRefStructProperty_Serialization()
+        {
+            if (Serializer.IsSourceGeneratedSerializer)
+            {
+                // The source generator warns but otherwise skips ref struct properties.
+                ClassWithRefStructProperty value = new();
+                string json = await Serializer.SerializeWrapper(value);
+                Assert.Equal("{}", json);
+
+                ClassWithRefStructProperty deserialized = await Serializer.DeserializeWrapper<ClassWithRefStructProperty>("""{"Value":"abc"}""");
+                Assert.True(deserialized.Value.IsEmpty);
+            }
+            else
+            {
+                // The reflection-based serializer throws.
+                Assert.Throws<InvalidOperationException>(() => Serializer.GetTypeInfo<ClassWithRefStructProperty>());
+            }
+        }
+
+        [Fact]
+        public async Task ClassWithRefStructConstructorParameter_Serialization()
+        {
+            if (Serializer.IsSourceGeneratedSerializer)
+            {
+                // The source generator warns but otherwise skips constructors with ref struct parameters.
+                ClassWithRefStructConstructorParameter value = new();
+                string json = await Serializer.SerializeWrapper(value);
+                Assert.Equal("""{"Value":"default"}""", json);
+
+                await Assert.ThrowsAsync<NotSupportedException>(() => Serializer.DeserializeWrapper<ClassWithRefStructConstructorParameter>("{}"));
+            }
+            else
+            {
+                // The reflection-based serializer throws.
+                Assert.Throws<InvalidOperationException>(() => Serializer.GetTypeInfo<ClassWithRefStructConstructorParameter>());
+            }
+        }
+
+#if NET
+        [Fact]
+        public void CollectionWithRefStructElement_Serialization()
+        {
+            if (Serializer.IsSourceGeneratedSerializer)
+            {
+                Assert.Throws<NotSupportedException>(() => Serializer.GetTypeInfo<CollectionWithRefStructElement>());
+            }
+            else
+            {
+                // The reflection-based serializer throws.
+                Assert.Throws<InvalidOperationException>(() => Serializer.GetTypeInfo<CollectionWithRefStructElement>());
+            }
+        }
+#endif
+
         private static object? GetDefaultValue(ParameterInfo parameterInfo)
         {
             Type parameterType = parameterInfo.ParameterType;
@@ -335,6 +426,7 @@ namespace System.Text.Json.Serialization.Tests
             return defaultValue;
         }
 
+        [RequiresUnreferencedCode("Uses Type.GetMember/Type.GetInterfaces reflection to resolve the member backing a JsonPropertyInfo.")]
         private static MemberInfo? ResolveMember(Type type, string name)
         {
             MemberInfo? result = type.GetMember(name, BindingFlags.Instance | BindingFlags.Public).FirstOrDefault();
@@ -463,6 +555,12 @@ namespace System.Text.Json.Serialization.Tests
             public int Value { get; init; }
         }
 
+        internal class ClassWithInitOnlyAndRequiredMembers
+        {
+            public int InitOnlyValue { get; init; }
+            public required string RequiredValue { get; set; }
+        }
+
         internal class ClassWithMultipleConstructors
         {
             public ClassWithMultipleConstructors() { }
@@ -551,6 +649,52 @@ namespace System.Text.Json.Serialization.Tests
             public string? X { get; }
             public string? Y { get; }
         }
+
+        public class ClassWithRefStructProperty
+        {
+            public ReadOnlySpan<char> Value
+            {
+                get => _value.AsSpan();
+                set => _value = value.ToString();
+            }
+
+            private string? _value;
+        }
+
+        public class ClassWithRefStructConstructorParameter
+        {
+            public ClassWithRefStructConstructorParameter()
+            {
+                Value = "default";
+            }
+
+            [JsonConstructor]
+            public ClassWithRefStructConstructorParameter(ReadOnlySpan<char> value)
+            {
+                Value = value.ToString();
+            }
+
+            public string Value { get; }
+        }
+
+#if NET
+        public class CollectionWithRefStructElement : IEnumerable<ReadOnlySpan<char>>
+        {
+            private List<string> _values = new();
+            public void Add(ReadOnlySpan<char> value) => _values.Add(value.ToString());
+            IEnumerator<ReadOnlySpan<char>> IEnumerable<ReadOnlySpan<char>>.GetEnumerator() => new SpanEnumerator(_values.GetEnumerator());
+            IEnumerator IEnumerable.GetEnumerator() => throw new NotImplementedException();
+
+            private sealed class SpanEnumerator(IEnumerator<string> inner) : IEnumerator<ReadOnlySpan<char>>
+            {
+                public ReadOnlySpan<char> Current => inner.Current.AsSpan();
+                object IEnumerator.Current => throw new NotSupportedException();
+                public void Dispose() => inner.Dispose();
+                public bool MoveNext() => inner.MoveNext();
+                public void Reset() => inner.Reset();
+            }
+        }
+#endif
     }
 
     internal class WeatherForecastWithPOCOs

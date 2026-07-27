@@ -44,32 +44,23 @@ internal sealed class RecordMap : IReadOnlyDictionary<SerializationRecordId, Ser
             }
             else
             {
-#if NET
-                if (_map.TryAdd(record.Id, record))
+                if (!_map.TryAdd(record.Id, record))
                 {
-                    return;
+                    throw new SerializationException(SR.Format(SR.Serialization_DuplicateSerializationRecordId, record.Id._id));
                 }
-#else
-                if (!_map.ContainsKey(record.Id))
-                {
-                    _map.Add(record.Id, record);
-                    return;
-                }
-#endif
-                throw new SerializationException(SR.Format(SR.Serialization_DuplicateSerializationRecordId, record.Id));
             }
         }
     }
 
-    internal SerializationRecord GetRootRecord(SerializedStreamHeaderRecord header)
-    {
-        SerializationRecord rootRecord = _map[header.RootId];
-        if (rootRecord is SystemClassWithMembersAndTypesRecord systemClass)
-        {
-            // update the record map, so it's visible also to those who access it via Id
-            _map[header.RootId] = rootRecord = systemClass.TryToMapToUserFriendly();
-        }
+    internal SerializationRecord GetRootRecord(SerializedStreamHeaderRecord header) => GetRecord(header.RootId);
 
-        return rootRecord;
-    }
+    internal SerializationRecord GetRecord(SerializationRecordId recordId)
+        => _map.TryGetValue(recordId, out SerializationRecord? record)
+            ? record
+            : throw new SerializationException(SR.Serialization_InvalidReference);
+
+    internal T GetRecord<T>(SerializationRecordId recordId) where T : SerializationRecord
+        => _map.TryGetValue(recordId, out SerializationRecord? record) && record is T casted
+            ? casted
+            : throw new SerializationException(SR.Serialization_InvalidReference);
 }

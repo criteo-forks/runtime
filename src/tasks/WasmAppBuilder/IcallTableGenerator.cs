@@ -10,7 +10,9 @@ using System.Text.Json;
 using System.Reflection;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
-using WasmAppBuilder;
+using JoinedString;
+
+namespace Microsoft.WebAssembly.Build.Tasks;
 
 internal sealed class IcallTableGenerator
 {
@@ -23,16 +25,19 @@ internal sealed class IcallTableGenerator
     private LogAdapter Log { get; set; }
     private readonly Func<string, string> _fixupSymbolName;
 
+    private bool _isCoreClr;
+
     //
     // Given the runtime generated icall table, and a set of assemblies, generate
     // a smaller linked icall table mapping tokens to C function names
     // The runtime icall table should be generated using
     // mono --print-icall-table
     //
-    public IcallTableGenerator(string? runtimeIcallTableFile, Func<string, string> fixupSymbolName, LogAdapter log)
+    public IcallTableGenerator(string? runtimeIcallTableFile, Func<string, string> fixupSymbolName, LogAdapter log, bool isCoreClr)
     {
         Log = log;
         _fixupSymbolName = fixupSymbolName;
+        _isCoreClr = isCoreClr;
         if (runtimeIcallTableFile != null)
             ReadTable(runtimeIcallTableFile);
     }
@@ -48,7 +53,7 @@ internal sealed class IcallTableGenerator
         if (outputPath != null)
         {
             using TempFileName tmpFileName = new();
-            using (var w = File.CreateText(tmpFileName.Path))
+            using (var w = new JoinedStringStreamWriter(tmpFileName.Path, false))
                 EmitTable(w);
 
             if (Utils.CopyIfDifferent(tmpFileName.Path, outputPath, useHash: false))
@@ -71,30 +76,28 @@ internal sealed class IcallTableGenerator
             var sorted = _icalls.Where(i => i.Assembly == assembly).ToArray();
             Array.Sort(sorted);
 
-            string aname;
-            if (assembly == "System.Private.CoreLib")
-                aname = "corlib";
-            else
-                aname = _fixupSymbolName(assembly);
-            w.WriteLine($"#define ICALL_TABLE_{aname} 1\n");
+            string aname = assembly == "System.Private.CoreLib" ? "corlib" : _fixupSymbolName(assembly);
 
-            w.WriteLine($"static int {aname}_icall_indexes [] = {{");
-            foreach (var icall in sorted)
-                w.WriteLine(string.Format("{0},", icall.TokenIndex));
-            w.WriteLine("};");
-            foreach (var icall in sorted)
-                w.WriteLine(GenIcallDecl(icall));
-            w.WriteLine($"static void *{aname}_icall_funcs [] = {{");
-            foreach (var icall in sorted)
-            {
-                w.WriteLine(string.Format("// token {0},", icall.TokenIndex));
-                w.WriteLine(string.Format("{0},", icall.Func));
-            }
-            w.WriteLine("};");
-            w.WriteLine($"static uint8_t {aname}_icall_flags [] = {{");
-            foreach (var icall in sorted)
-                w.WriteLine(string.Format("{0},", icall.Flags));
-            w.WriteLine("};");
+            w.Write(
+                $$"""
+
+                #define ICALL_TABLE_{{aname}} 1
+
+                static int {{aname}}_icall_indexes [] = {
+                    {{sorted.Join($",{w.NewLine}    ", (icall, i) => $"/* {i} */ {icall.TokenIndex}")}}
+                };
+
+                {{sorted.Join($" {w.NewLine}", GenIcallDecl)}}
+
+                static void *{{aname}}_icall_funcs [] = {
+                    {{sorted.Join($",{w.NewLine}    ", (icall, i) => $"/* {i}:{icall.TokenIndex} */ {icall.Func}" )}}
+                };
+
+                static uint8_t {{aname}}_icall_flags [] = {
+                    {{sorted.Join($",{w.NewLine}    ", (icall, i) => $"/* {i}:{icall.TokenIndex} */ {icall.Flags}")}}
+                };
+
+                """);
         }
     }
 
@@ -207,7 +210,7 @@ internal sealed class IcallTableGenerator
 
         void AddSignature(Type type, MethodInfo method)
         {
-            string? signature = SignatureMapper.MethodToSignature(method, Log);
+            string? signature = _isCoreClr ? CoreClr.SignatureMapper.MethodToSignature(method, Log) : Mono.SignatureMapper.MethodToSignature(method, Log);
             if (signature == null)
             {
                 throw new LogAsErrorException($"Unsupported parameter type in method '{type.FullName}.{method.Name}'");
@@ -275,33 +278,18 @@ internal sealed class IcallTableGenerator
         _ => "int",
     };
 
+
     private static string GenIcallDecl(Icall icall)
     {
-        var sb = new StringBuilder();
+        List<string> args = new();
         var method = icall.Method!;
-        sb.Append(MapType(method.ReturnType));
-        sb.Append($" {icall.Func} (");
-        int aindex = 0;
         if (!method.IsStatic)
-        {
-            sb.Append("int");
-            aindex++;
-        }
-        foreach (var p in method.GetParameters())
-        {
-            if (aindex > 0)
-                sb.Append(',');
-            sb.Append(MapType(p.ParameterType));
-            aindex++;
-        }
+            args.Add("int");
+        args.AddRange(method.GetParameters().Select(p => MapType(p.ParameterType)));
         if (icall.Handles)
-        {
-            if (aindex > 0)
-                sb.Append(',');
-            sb.Append("int");
-        }
-        sb.Append(");");
-        return sb.ToString();
+            args.Add("int");
+
+        return $"{MapType(method.ReturnType)} {icall.Func} ({args.Join(", ")});";
     }
 
     private sealed class Icall : IComparable<Icall>

@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <CLRTestExecutionArguments />
   </PropertyGroup>
   <PropertyGroup>
@@ -8,5 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="InputValidation.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(TestLibraryProjectPath)" />
   </ItemGroup>
 </Project>

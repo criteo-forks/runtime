@@ -96,12 +96,7 @@ void Exception::Delete(Exception* pvMemory)
         return;
     }
 
-#ifdef DACCESS_COMPILE
     delete pvMemory;
-#else
-    ::delete pvMemory;
-#endif
-
 }
 
 void Exception::GetMessage(SString &result)
@@ -174,7 +169,7 @@ BOOL Exception::IsTerminal()
         GC_NOTRIGGER;
         NOTHROW;
 
-        // CLRException::GetHR() can eventually call BaseDomain::CreateHandle(),
+        // CLRException::GetHR() can eventually call AppDomain::CreateHandle(),
         // which can indirectly cause a lock if we get a miss in the handle table
         // cache (TableCacheMissOnAlloc).  Since CLRException::GetHR() is virtual,
         // SCAN won't find this for you (though 40 minutes of one of the sql stress
@@ -226,10 +221,6 @@ BOOL Exception::IsPreallocatedOOMException()
 }
 
 //------------------------------------------------------------------------------
-#ifdef _PREFAST_
-#pragma warning(push)
-#pragma warning(disable:21000) // Suppress PREFast warning about overly large function
-#endif
 LPCSTR Exception::GetHRSymbolicName(HRESULT hr)
 {
     LIMITED_METHOD_CONTRACT;
@@ -778,10 +769,6 @@ LPCSTR Exception::GetHRSymbolicName(HRESULT hr)
             return NULL;
     }
 }
-#ifdef _PREFAST_
-#pragma warning(pop)
-#endif
-
 
 // ---------------------------------------------------------------------------
 // HRException class.  Implements exception API for exceptions from HRESULTS
@@ -801,6 +788,7 @@ HRESULT HRException::GetHR()
 // SEHException class.  Implements exception API for SEH exception info
 // ---------------------------------------------------------------------------
 
+#ifdef TARGET_WINDOWS
 HRESULT SEHException::GetHR()
 {
     LIMITED_METHOD_DAC_CONTRACT;
@@ -841,6 +829,7 @@ void SEHException::GetMessage(SString &string)
         }
     }
 }
+#endif // TARGET_WINDOWS
 
 //==============================================================================
 // DelegatingException class.  Implements exception API for "foreign" exceptions.
@@ -1013,7 +1002,7 @@ void DECLSPEC_NORETURN ThrowHR(HRESULT hr, UINT uText)
 
     // We won't check the return value here. If it fails, we'll just
     // throw the HR
-    sExceptionText.LoadResource(CCompRC::Error, uText);
+    sExceptionText.LoadResource(uText);
 
     EX_THROW(HRMsgException, (hr, sExceptionText));
 }
@@ -1164,7 +1153,7 @@ void GetHRMsg(HRESULT hr, SString &result, BOOL bNoGeekStuff/* = FALSE*/)
 
     if (FAILED(hr) && HRESULT_FACILITY(hr) == FACILITY_URT && HRESULT_CODE(hr) < MAX_URT_HRESULT_CODE)
     {
-        fHaveDescr = strDescr.LoadResource(CCompRC::Error, MSG_FOR_URT_HR(hr));
+        fHaveDescr = strDescr.LoadResource(MSG_FOR_URT_HR(hr));
     }
     else
     {

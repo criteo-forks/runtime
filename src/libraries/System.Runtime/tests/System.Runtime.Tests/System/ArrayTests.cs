@@ -8,6 +8,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Microsoft.DotNet.RemoteExecutor;
 using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 
@@ -369,7 +370,7 @@ namespace System.Tests
         [InlineData(new char[] { '\0' }, 0, 1, null, null, -1)]
         [InlineData(new float[] { 0 }, 0, 1, null, null, -1)]
         [InlineData(new double[] { 0 }, 0, 1, null, null, -1)]
-        public static void BinarySearch_Array(Array array, int index, int length, object value, IComparer comparer, int expected)
+        public static void BinarySearch_Array(Array array, int index, int length, object? value, IComparer? comparer, int expected)
         {
             bool isDefaultComparer = comparer == null || comparer == Comparer.Default;
             if (index == array.GetLowerBound(0) && length == array.Length)
@@ -1220,6 +1221,10 @@ namespace System.Tests
 
             // Single[] -> primitive[]
             yield return new object[] { new float[] { 1, 2.2f, 3 }, 0, new double[3], 0, 3, new double[] { 1, 2.2f, 3 } };
+
+            // SByteEnum[] -> primitive[]
+            yield return new object[] { new SByteEnum[] { (SByteEnum)1, (SByteEnum)2, (SByteEnum)3 }, 0, new int[3], 0, 3, new int[] { 1, 2, 3 } };
+            yield return new object[] { new SByteEnum[] { (SByteEnum)1, (SByteEnum)2, (SByteEnum)3 }, 0, new Int32Enum[3], 0, 3, new Int32Enum[] { (Int32Enum)1, (Int32Enum)2, (Int32Enum)3 } };
         }
 
         public static IEnumerable<object[]> Copy_SZArray_UnreliableConversion_CanPerform_TestData()
@@ -1582,6 +1587,12 @@ namespace System.Tests
 
             // ValueType[] -> InterfaceNotImplementedByValueType[] never works
             yield return new object[] { new StructWithNonGenericInterface1[1], new NonGenericInterface2[1] };
+
+            // ValueType[] -> ValueType[] never works
+            yield return new object[] { new StructWithNonGenericInterface1[1], new StructWithNonGenericInterface1_2[1] };
+
+            // ValueType[] -> Nullable[] never works
+            yield return new object[] { new int[1], new int?[1] };
         }
 
         [Theory]
@@ -3210,7 +3221,7 @@ namespace System.Tests
         [InlineData(new int[] { 1, 2, 3, 4, 5 }, 7, new int[] { 1, 2, 3, 4, 5, default(int), default(int) })]
         [InlineData(new int[] { 1, 2, 3, 4, 5 }, 3, new int[] { 1, 2, 3 })]
         [InlineData(null, 3, new int[] { default(int), default(int), default(int) })]
-        public static void Resize(int[] array, int newSize, int[] expected)
+        public static void Resize(int[]? array, int newSize, int[] expected)
         {
             int[] testArray = array;
             Array.Resize(ref testArray, newSize);
@@ -4900,9 +4911,75 @@ namespace System.Tests
     {
         static readonly GCMemoryInfo memoryInfo = GC.GetGCMemoryInfo();
 
+        // The flattened length (2 * Dim1Length) must exceed int.MaxValue so the
+        // index math crosses the 32-bit boundary, exercising the native-sized
+        // paths in Copy/Clear. byte elements keep the allocation to ~2 GB.
+        private const int Dim1Length = (int.MaxValue / 2) + 2;
+
+        // Reported by the child when the allocation throws, so the parent can skip.
+        // RemoteExecutor rethrows an escaping exception regardless of CheckExitCode,
+        // so this has to be caught in the child to be distinguishable from a failure.
+        private const int OutOfMemoryExitCode = 3;
+
+        // 128 + SIGKILL, as reported for a child terminated by the Unix OOM killer.
+        private const int SigKillExitCode = 128 + 9;
+
         [OuterLoop] // Allocates large array
-        [ConditionalFact]
+        [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
         public static void Copy_LargeMultiDimensionalArray()
+        {
+            InvokeAllocatingLargeArray(static () =>
+            {
+                try
+                {
+                    byte[,] a = new byte[2, Dim1Length];
+                    a[0, 1] = 42;
+                    Array.Copy(a, 1, a, int.MaxValue, 2);
+                    Assert.Equal(42, a[1, int.MaxValue - Dim1Length]);
+
+                    Array.Clear(a, int.MaxValue - 1, 3);
+                    Assert.Equal(0, a[1, int.MaxValue - Dim1Length]);
+                }
+                catch (OutOfMemoryException)
+                {
+                    return OutOfMemoryExitCode;
+                }
+                return RemoteExecutor.SuccessExitCode;
+            });
+        }
+
+        [OuterLoop] // Allocates large array
+        [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
+        public static void Clear_LargeMultiDimensionalArray()
+        {
+            InvokeAllocatingLargeArray(static () =>
+            {
+                try
+                {
+                    byte[,] a = new byte[2, Dim1Length];
+
+                    // Test 1: use Array.Clear
+                    a[1, Dim1Length - 1] = 0x12;
+                    Array.Clear(a);
+                    Assert.Equal(0, a[1, Dim1Length - 1]);
+
+                    // Test 2: use IList.Clear
+                    a[1, Dim1Length - 1] = 0x12;
+                    ((IList)a).Clear();
+                    Assert.Equal(0, a[1, Dim1Length - 1]);
+                }
+                catch (OutOfMemoryException)
+                {
+                    return OutOfMemoryExitCode;
+                }
+                return RemoteExecutor.SuccessExitCode;
+            });
+        }
+
+        // Runs the large-array body in a child process so that memory pressure fails
+        // just this test instead of taking down the whole run, and translates an
+        // out-of-memory outcome into a skip rather than a failure.
+        private static void InvokeAllocatingLargeArray(Func<int> body)
         {
             // If this test is run in a 32-bit process, the large allocation will fail.
             if (IntPtr.Size != sizeof(long))
@@ -4910,63 +4987,26 @@ namespace System.Tests
                 throw new SkipTestException("Unable to allocate enough memory");
             }
 
-            if (memoryInfo.TotalAvailableMemoryBytes < 4_000_000_000 )
+            if (memoryInfo.TotalAvailableMemoryBytes < 4_000_000_000)
             {
-                // On these platforms, occasionally the OOM Killer will terminate the
-                // tests when they're using ~1GB, before they complete.
+                // The array is ~2 GB; require headroom so the OOM killer doesn't
+                // terminate the process before the test completes.
                 throw new SkipTestException($"Prone to OOM killer. {memoryInfo.TotalAvailableMemoryBytes} is available.");
             }
 
-            short[,] a = AllocateLargeMDArray(2, 2_000_000_000);
-            a[0, 1] = 42;
-            Array.Copy(a, 1, a, Int32.MaxValue, 2);
-            Assert.Equal(42, a[1, Int32.MaxValue - 2_000_000_000]);
+            using RemoteInvokeHandle handle = RemoteExecutor.Invoke(body, new RemoteInvokeOptions { CheckExitCode = false });
+            handle.Process.WaitForExit();
+            int exitCode = handle.Process.ExitCode;
 
-            Array.Clear(a, Int32.MaxValue - 1, 3);
-            Assert.Equal(0, a[1, Int32.MaxValue - 2_000_000_000]);
-        }
-
-        [OuterLoop] // Allocates large array
-        [ConditionalFact]
-        public static void Clear_LargeMultiDimensionalArray()
-        {
-            // If this test is run in a 32-bit process, the large allocation will fail.
-            if (IntPtr.Size != sizeof(long))
+            // Memory pressure surfaces differently per OS: Windows fails the commit and
+            // throws a catchable OutOfMemoryException, where-as Linux overcommits and the
+            // OOM killer SIGKILLs the child once the pages are touched, with no exception.
+            if (exitCode == OutOfMemoryExitCode || exitCode == SigKillExitCode)
             {
-                throw new SkipTestException("Unable to allocate enough memory");
+                throw new SkipTestException($"Ran out of memory allocating the large array. Exit code {exitCode}.");
             }
 
-            if (memoryInfo.TotalAvailableMemoryBytes < 4_000_000_000 )
-            {
-                // On these platforms, occasionally the OOM Killer will terminate the
-                // tests when they're using ~1GB, before they complete.
-                throw new SkipTestException($"Prone to OOM killer. ${memoryInfo.TotalAvailableMemoryBytes} is available.");
-            }
-
-            short[,] a = AllocateLargeMDArray(2, 2_000_000_000);
-
-            // Test 1: use Array.Clear
-            a[1, 1_999_999_999] = 0x1234;
-            Array.Clear(a);
-            Assert.Equal(0, a[1, 1_999_999_999]);
-
-            // Test 2: use IList.Clear
-            a[1, 1_999_999_999] = 0x1234;
-            ((IList)a).Clear();
-            Assert.Equal(0, a[1, 1_999_999_999]);
-        }
-
-        private static short[,] AllocateLargeMDArray(int dim0Length, int dim1Length)
-        {
-            try
-            {
-                return new short[dim0Length, dim1Length];
-            }
-            catch (OutOfMemoryException)
-            {
-                // not a fatal error - we'll just skip the test in this case
-                throw new SkipTestException("Unable to allocate enough memory");
-            }
+            Assert.Equal(RemoteExecutor.SuccessExitCode, exitCode);
         }
     }
 }

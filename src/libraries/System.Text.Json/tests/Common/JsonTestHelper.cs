@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json.Serialization;
@@ -157,6 +158,7 @@ namespace System.Text.Json
             }
         }
 
+        [RequiresUnreferencedCode("AssertOptionsEqual uses reflection to enumerate JsonSerializerOptions properties.")]
         public static void AssertOptionsEqual(JsonSerializerOptions expected, JsonSerializerOptions actual)
         {
             foreach (PropertyInfo property in typeof(JsonSerializerOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance))
@@ -246,16 +248,6 @@ namespace System.Text.Json
             IEnumerable<TThird> third,
             Func<TFirst, TSecond, TThird, TResult> resultSelector)
             => first.CrossJoin(second, third).Select(tuple => resultSelector(tuple.First, tuple.Second, tuple.Third));
-
-        public static async Task<List<T>> ToListAsync<T>(this IAsyncEnumerable<T> source)
-        {
-            var list = new List<T>();
-            await foreach (T item in source)
-            {
-                list.Add(item);
-            }
-            return list;
-        }
 
         private static readonly Regex s_stripWhitespace = new Regex(@"\s+", RegexOptions.Compiled);
 

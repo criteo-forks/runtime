@@ -27,7 +27,7 @@ namespace HostActivation.Tests
             CommandResult result = Command.Create(sharedTestState.UnboundAppHost)
                 .CaptureStdErr()
                 .CaptureStdOut()
-                .Execute(expectedToFail: true);
+                .Execute();
 
             result.Should().Fail()
                 .And.HaveStdErrContaining("This executable is not bound to a managed DLL to execute.")
@@ -70,7 +70,7 @@ namespace HostActivation.Tests
             CommandResult result = Command.Create(sharedTestState.RenamedDotNet)
                 .CaptureStdErr()
                 .CaptureStdOut()
-                .Execute(expectedToFail: true);
+                .Execute();
 
             result.Should().Fail()
                 .And.HaveStdErrContaining($"Error: cannot execute dotnet when renamed to {Path.GetFileNameWithoutExtension(sharedTestState.RenamedDotNet)}")
@@ -90,16 +90,16 @@ namespace HostActivation.Tests
                 BaseDirectory = TestArtifact.Create(nameof(InvalidHost));
                 Directory.CreateDirectory(BaseDirectory.Location);
 
-                RenamedDotNet = Path.Combine(BaseDirectory.Location, Binaries.GetExeFileNameForCurrentPlatform("renamed"));
+                RenamedDotNet = Path.Combine(BaseDirectory.Location, Binaries.GetExeName("renamed"));
                 File.Copy(Binaries.DotNet.FilePath, RenamedDotNet);
 
-                UnboundAppHost = Path.Combine(BaseDirectory.Location, Binaries.GetExeFileNameForCurrentPlatform("unbound"));
+                UnboundAppHost = Path.Combine(BaseDirectory.Location, Binaries.GetExeName("unbound"));
                 File.Copy(Binaries.AppHost.FilePath, UnboundAppHost);
 
                 if (OperatingSystem.IsWindows())
                 {
                     // Mark the apphost as GUI, but don't bind it to anything - this will cause it to fail
-                    UnboundAppHostGUI = Path.Combine(BaseDirectory.Location, Binaries.GetExeFileNameForCurrentPlatform("unboundgui"));
+                    UnboundAppHostGUI = Path.Combine(BaseDirectory.Location, Binaries.GetExeName("unboundgui"));
                     File.Copy(Binaries.AppHost.FilePath, UnboundAppHostGUI);
                     PEUtils.SetWindowsGraphicalUserInterfaceBit(UnboundAppHostGUI);
                 }
@@ -112,4 +112,3 @@ namespace HostActivation.Tests
         }
     }
 }
-

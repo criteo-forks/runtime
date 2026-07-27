@@ -3,6 +3,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.DotNet.XHarness.TestRunners.Common;
 using Microsoft.DotNet.XHarness.TestRunners.Xunit;
@@ -12,7 +16,32 @@ public class WasmTestRunner : WasmApplicationEntryPoint
     protected int MaxParallelThreadsFromArg { get; set; }
     protected override int? MaxParallelThreads => RunInParallel ? MaxParallelThreadsFromArg : base.MaxParallelThreads;
 
-    public static async Task<int> Main(string[] args)
+#if TARGET_WASI
+    public static int Main(string[] args)
+    {
+        return PollWasiEventLoopUntilResolved((Thread)null!, MainAsync(args));
+
+        [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "PollWasiEventLoopUntilResolved")]
+        static extern T PollWasiEventLoopUntilResolved<T>(Thread t, Task<T> mainTask);
+    }
+
+
+#else
+    public static Task<int> Main(string[] args)
+    {
+        return MainAsync(args);
+    }
+#endif
+
+    // WASM-TODO: workaround for https://github.com/dotnet/runtime/issues/122972
+    protected override IEnumerable<TestAssemblyInfo> GetTestAssemblies()
+    {
+        AssemblyName an = new AssemblyName(Path.GetFileNameWithoutExtension(TestAssembly));
+        Assembly assembly = Assembly.Load(an);
+        return new[] { new TestAssemblyInfo(assembly, TestAssembly) };
+    }
+
+    public static async Task<int> MainAsync(string[] args)
     {
         if (args.Length == 0)
         {

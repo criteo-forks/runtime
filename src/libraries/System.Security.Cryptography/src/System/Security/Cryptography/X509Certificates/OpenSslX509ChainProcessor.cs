@@ -46,7 +46,7 @@ namespace System.Security.Cryptography.X509Certificates
         private SafeX509StoreHandle _store;
         private readonly SafeX509StackHandle _untrustedLookup;
         private readonly SafeX509StoreCtxHandle _storeCtx;
-        private readonly DateTime _verificationTime;
+        private readonly DateTimeOffset _verificationTime;
         private readonly TimeSpan _downloadTimeout;
         private WorkingChain? _workingChain;
 
@@ -55,7 +55,7 @@ namespace System.Security.Cryptography.X509Certificates
             SafeX509StoreHandle store,
             SafeX509StackHandle untrusted,
             SafeX509StoreCtxHandle storeCtx,
-            DateTime verificationTime,
+            DateTimeOffset verificationTime,
             TimeSpan downloadTimeout)
         {
             _leafHandle = leafHandle;
@@ -95,7 +95,7 @@ namespace System.Security.Cryptography.X509Certificates
             SafeX509Handle leafHandle,
             X509Certificate2Collection? customTrustStore,
             X509ChainTrustMode trustMode,
-            DateTime verificationTime,
+            DateTimeOffset verificationTime,
             TimeSpan remainingDownloadTime)
         {
             OpenSslCachedSystemStoreProvider.GetNativeCollections(
@@ -212,7 +212,7 @@ namespace System.Security.Cryptography.X509Certificates
             }
         }
 
-        internal Interop.Crypto.X509VerifyStatusCode FindChainViaAia(
+        internal unsafe Interop.Crypto.X509VerifyStatusCode FindChainViaAia(
             ref List<X509Certificate2>? downloadedCerts)
         {
             IntPtr lastCert = IntPtr.Zero;
@@ -221,8 +221,13 @@ namespace System.Security.Cryptography.X509Certificates
             Interop.Crypto.X509VerifyStatusCode statusCode =
                 X509VerifyStatusCodeUniversal.X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT;
 
-            while (!IsCompleteChain(statusCode))
+            const int DownloadLimit = 2;
+            int downloadsRemaining = DownloadLimit;
+
+            while (downloadsRemaining > 0 && !IsCompleteChain(statusCode))
             {
+                downloadsRemaining--;
+
                 using (SafeX509Handle currentCert = Interop.Crypto.X509StoreCtxGetCurrentCert(storeCtx))
                 {
                     IntPtr currentHandle = currentCert.DangerousGetHandle();
@@ -401,7 +406,7 @@ namespace System.Security.Cryptography.X509Certificates
                                     cert,
                                     _store,
                                     revocationMode,
-                                    _verificationTime,
+                                    _verificationTime.LocalDateTime,
                                     _downloadTimeout);
                             }
                         }
@@ -1142,6 +1147,7 @@ namespace System.Security.Cryptography.X509Certificates
                 case X509VerifyStatusCodeUniversal.X509_V_ERR_EXCLUDED_VIOLATION:
                     return X509ChainStatusFlags.HasExcludedNameConstraint;
 
+                case X509VerifyStatusCodeUniversal.X509_V_ERR_UNSUPPORTED_CONSTRAINT_TYPE:
                 case X509VerifyStatusCodeUniversal.X509_V_ERR_SUBTREE_MINMAX:
                     return X509ChainStatusFlags.HasNotSupportedNameConstraint;
 
@@ -1167,19 +1173,7 @@ namespace System.Security.Cryptography.X509Certificates
                     return X509ChainStatusFlags.InvalidBasicConstraints;
                 default:
                     Debug.Fail("Unrecognized X509VerifyStatusCode:" + code.Code30);
-                    throw new CryptographicException();
-            }
-        }
-
-        private static X509ChainStatusFlags MapOpenSsl102Code(Interop.Crypto.X509VerifyStatusCode code)
-        {
-            switch (code.Code102)
-            {
-                case Interop.Crypto.X509VerifyStatusCode102.X509_V_ERR_INVALID_CA:
-                    return X509ChainStatusFlags.InvalidBasicConstraints;
-                default:
-                    Debug.Fail("Unrecognized X509VerifyStatusCode:" + code.Code102);
-                    throw new CryptographicException();
+                    throw GetUnmappedCodeException(nameof(MapOpenSsl30Code), (int)code.Code30);
             }
         }
 
@@ -1191,7 +1185,7 @@ namespace System.Security.Cryptography.X509Certificates
                     return X509ChainStatusFlags.InvalidBasicConstraints;
                 default:
                     Debug.Fail("Unrecognized X509VerifyStatusCode:" + code.Code111);
-                    throw new CryptographicException();
+                    throw GetUnmappedCodeException(nameof(MapOpenSsl111Code), (int)code.Code111);
             }
         }
 
@@ -1230,8 +1224,8 @@ namespace System.Security.Cryptography.X509Certificates
         {
             try
             {
-                AsnValueReader reader = new AsnValueReader(authorityInformationAccess.Span, AsnEncodingRules.DER);
-                AsnValueReader sequenceReader = reader.ReadSequence();
+                ValueAsnReader reader = new ValueAsnReader(authorityInformationAccess.Span, AsnEncodingRules.DER);
+                ValueAsnReader sequenceReader = reader.ReadSequence();
                 reader.ThrowIfNotEmpty();
 
                 while (sequenceReader.HasData)
@@ -1416,16 +1410,21 @@ namespace System.Security.Cryptography.X509Certificates
                 return MapOpenSsl111Code;
             }
 
-            return MapOpenSsl102Code;
+            throw new CryptographicException();
         }
 
-        private unsafe struct ErrorCollection
+        private static CryptographicException GetUnmappedCodeException(string functionName, int code)
+        {
+            return new CryptographicException(SR.Format(SR.Cryptography_UnmappedOpenSslCode, functionName, code));
+        }
+
+        private struct ErrorCollection
         {
             // As of OpenSSL 1.1.1 there are 75 defined X509_V_ERR values,
             // therefore it fits in a bitvector backed by 3 ints (96 bits available).
             private const int BucketCount = 3;
             private const int OverflowValue = BucketCount * sizeof(int) * 8 - 1;
-            private fixed int _codes[BucketCount];
+            private InlineArray3<int> _codes;
 
             internal bool HasOverflow => _codes[2] < 0;
 

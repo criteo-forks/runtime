@@ -16,7 +16,6 @@
 #include "debugdebugger.h"
 #include "../inc/common.h"
 #include "eeconfig.h" // This is here even for retail & free builds...
-#include "../../dlls/mscorrc/resource.h"
 
 #include "vars.hpp"
 #include "threads.h"
@@ -259,7 +258,7 @@ static void ValidateFuncEvalReturnType(DebuggerIPCE_FuncEvalType evalType, Metho
 //
 // Given a register, return the value.
 //
-static SIZE_T GetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, void *regAddr, SIZE_T regValue)
+static SIZE_T GetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, CORDB_ADDRESS regAddr, ULONG64 regValue)
 {
     LIMITED_METHOD_CONTRACT;
 
@@ -268,9 +267,9 @@ static SIZE_T GetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, void *re
     // Check whether the register address is the marker value for a register in a non-leaf frame.
     // This is related to the funceval breaking change.
     //
-    if (regAddr == CORDB_ADDRESS_TO_PTR(kNonLeafFrameRegAddr))
+    if (regAddr == kNonLeafFrameRegAddr)
     {
-        ret = regValue;
+        ret = (SIZE_T)regValue;
     }
     else
     {
@@ -473,7 +472,7 @@ static SIZE_T GetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, void *re
 //
 // Given a register, set its value.
 //
-static void SetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, void *regAddr, SIZE_T newValue)
+static void SetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, CORDB_ADDRESS regAddr, SIZE_T newValue)
 {
     CONTRACTL
     {
@@ -483,7 +482,7 @@ static void SetRegisterValue(DebuggerEval *pDE, CorDebugRegister reg, void *regA
 
     // Check whether the register address is the marker value for a register in a non-leaf frame.
     // If so, then we can't update the register.  Throw an exception to communicate this error.
-    if (regAddr == CORDB_ADDRESS_TO_PTR(kNonLeafFrameRegAddr))
+    if (regAddr == kNonLeafFrameRegAddr)
     {
         COMPlusThrowHR(CORDBG_E_FUNC_EVAL_CANNOT_UPDATE_REGISTER_IN_NONLEAF_FRAME);
         return;
@@ -875,7 +874,7 @@ static void GetFuncEvalArgValue(DebuggerEval *pDE,
             LPVOID pAddr = NULL;
             INT64 bigVal = 0;
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 pAddr = *((void **)pMaybeInteriorPtrArg);
             }
@@ -908,7 +907,7 @@ static void GetFuncEvalArgValue(DebuggerEval *pDE,
                 }
                 else
                 {
-                    _ASSERTE(pFEAD->argAddr != NULL);
+                    _ASSERTE(pFEAD->argAddr != (CORDB_ADDRESS)0);
 #if defined(ENREGISTERED_PARAMTYPE_MAXSIZE)
                     if (ArgIterator::IsArgPassedByRef(argTH))
                     {
@@ -947,7 +946,7 @@ static void GetFuncEvalArgValue(DebuggerEval *pDE,
                 }
                 else
                 {
-                    if (pFEAD->argAddr)
+                    if (pFEAD->argAddr != (CORDB_ADDRESS)0)
                     {
                         *pArgument = PtrToArgSlot(pAddr);
                     }
@@ -997,7 +996,7 @@ static void GetFuncEvalArgValue(DebuggerEval *pDE,
                 pSource = pBufferArg;
             }
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 if (!isByRef)
                 {
@@ -1263,7 +1262,7 @@ static void SetFuncEvalByRefArgValue(DebuggerEval *pDE,
                 // If this was a literal arg, then copy the updated primitive back into the literal.
                 memcpy(pFEAD->argLiteralData, &source, sizeof(pFEAD->argLiteralData));
             }
-            else if (pFEAD->argAddr != NULL)
+            else if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 *((INT64 *)byRefMaybeInteriorPtrArg) = source;
                 return;
@@ -1345,7 +1344,7 @@ static void SetFuncEvalByRefArgValue(DebuggerEval *pDE,
                     memcpy(pFEAD->argLiteralData, &source, sizeof(source));
                 }
             }
-            else if (pFEAD->argAddr == NULL)
+            else if (pFEAD->argAddr == (CORDB_ADDRESS)0)
             {
                 // If the 32bit value is enregistered, copy it back to the proper regs.
 
@@ -1443,9 +1442,9 @@ static void GCProtectAllPassedArgs(DebuggerEval *pDE,
 
         // In case any of the arguments is a by ref argument and points into the GC heap,
         // we need to GC protect their addresses as well.
-        if (pFEAD->argAddr != NULL)
+        if (pFEAD->argAddr != (CORDB_ADDRESS)0)
         {
-            pByRefMaybeInteriorPtrArray[currArgIndex] = pFEAD->argAddr;
+            pByRefMaybeInteriorPtrArray[currArgIndex] = CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
         }
 
         switch (pFEAD->argElementType)
@@ -1461,9 +1460,9 @@ static void GCProtectAllPassedArgs(DebuggerEval *pDE,
             //
             _ASSERTE(sizeof(void *) == sizeof(INT64));
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
-                pMaybeInteriorPtrArray[currArgIndex] = *((void **)(pFEAD->argAddr));
+                pMaybeInteriorPtrArray[currArgIndex] = *((void **)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr));
 #ifdef _DEBUG
                 if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
                 {
@@ -1511,9 +1510,9 @@ static void GCProtectAllPassedArgs(DebuggerEval *pDE,
             //
             // If the value type address could be an interior pointer.
             //
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
-                pMaybeInteriorPtrArray[currArgIndex] = ((void **)(pFEAD->argAddr));
+                pMaybeInteriorPtrArray[currArgIndex] = ((void **)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr));
             }
 
             INDEBUG(pDataLocationArray[currArgIndex] |= DL_MaybeInteriorPtrArray);
@@ -1525,18 +1524,18 @@ static void GCProtectAllPassedArgs(DebuggerEval *pDE,
         case ELEMENT_TYPE_ARRAY:
         case ELEMENT_TYPE_SZARRAY:
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 if (pFEAD->argIsHandleValue)
                 {
-                    OBJECTHANDLE oh = (OBJECTHANDLE)(pFEAD->argAddr);
+                    OBJECTHANDLE oh = (OBJECTHANDLE)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
                     pBufferForArgsArray[currArgIndex] = (INT64)(size_t)oh;
 
                     INDEBUG(pDataLocationArray[currArgIndex] |= DL_BufferForArgsArray);
                 }
                 else
                 {
-                    pObjectRefArray[currArgIndex] = *((OBJECTREF *)(pFEAD->argAddr));
+                    pObjectRefArray[currArgIndex] = *((OBJECTREF *)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr));
 
                     INDEBUG(pDataLocationArray[currArgIndex] |= DL_ObjectRefArray);
                 }
@@ -1581,7 +1580,7 @@ static void GCProtectAllPassedArgs(DebuggerEval *pDE,
 #ifdef TARGET_X86
             _ASSERTE(sizeof(void *) == sizeof(INT32));
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 if (pFEAD->argIsHandleValue)
                 {
@@ -1591,7 +1590,7 @@ static void GCProtectAllPassedArgs(DebuggerEval *pDE,
                 }
                 else
                 {
-                    pMaybeInteriorPtrArray[currArgIndex] = *((void **)(pFEAD->argAddr));
+                    pMaybeInteriorPtrArray[currArgIndex] = *((void **)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr));
 #ifdef _DEBUG
                     if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
                     {
@@ -1690,9 +1689,6 @@ void ResolveFuncEvalGenericArgInfo(DebuggerEval *pDE)
     }
 
     // Find the proper MethodDesc that we need to call.
-    // Since we're already in the target domain, it can't be unloaded so it's safe to
-    // use domain specific structures like the Module*.
-    _ASSERTE( GetAppDomain() == pDE->m_debuggerModule->GetAppDomain() );
     pDE->m_md = g_pEEInterface->LoadMethodDef(pDE->m_debuggerModule->GetRuntimeModule(),
                                               pDE->m_methodToken,
                                               nGenericArgs,
@@ -1796,7 +1792,7 @@ void BoxFuncEvalThisParameter(DebuggerEval *pDE,
                 {
                     GCX_FORBID();    //pAddr is unprotected from the time we initialize it
 
-                    if (pFEAD->argAddr != NULL)
+                    if (pFEAD->argAddr != (CORDB_ADDRESS)0)
                     {
                         _ASSERTE(pDataLocationArray[0] & DL_MaybeInteriorPtrArray);
                         pAddr = pMaybeInteriorPtrArray[0];
@@ -1825,8 +1821,8 @@ void BoxFuncEvalThisParameter(DebuggerEval *pDE,
                 // type yet).
                 //
                 // A buffer should have been allocated for the full struct type
-                _ASSERTE(argData[0].fullArgType != NULL);
-                Debugger::TypeDataWalk walk((DebuggerIPCE_TypeArgData *) argData[0].fullArgType, argData[0].fullArgTypeNodeCount);
+                _ASSERTE(argData[0].fullArgType != (CORDB_ADDRESS)0);
+                Debugger::TypeDataWalk walk((DebuggerIPCE_TypeArgData *) CORDB_ADDRESS_TO_PTR(argData[0].fullArgType), argData[0].fullArgTypeNodeCount);
 
                 TypeHandle typeHandle = walk.ReadTypeHandle();
 
@@ -2023,7 +2019,7 @@ void BoxFuncEvalArguments(DebuggerEval *pDE,
             INT64 bigVal;
             LPVOID pAddr = NULL;
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 _ASSERTE(pDataLocationArray[currArgIndex] & DL_MaybeInteriorPtrArray);
                 pAddr = pMaybeInteriorPtrArray[currArgIndex];
@@ -2103,6 +2099,7 @@ void GatherFuncEvalMethodInfo(DebuggerEval *pDE,
     //
     if ((pDE->m_evalType != DB_IPCE_FET_NEW_OBJECT) && !pDE->m_md->IsStatic() && pDE->m_md->IsUnboxingStub())
     {
+        GCX_PREEMP();
         *ppUnboxedMD = pDE->m_md->GetMethodTable()->GetUnboxedEntryPointMD(pDE->m_md);
     }
 
@@ -2128,7 +2125,7 @@ void GatherFuncEvalMethodInfo(DebuggerEval *pDE,
         // We should have a valid this pointer.
         // <TODO>@todo: But the check should cover the register kind as well!</TODO>
         //
-        if ((argData[0].argHome.kind == RAK_NONE) && (argData[0].argAddr == NULL))
+        if ((argData[0].argHome.kind == RAK_NONE) && (argData[0].argAddr == (CORDB_ADDRESS)0))
         {
             COMPlusThrow(kArgumentNullException);
         }
@@ -2217,13 +2214,20 @@ void GatherFuncEvalMethodInfo(DebuggerEval *pDE,
         // Now, find the proper MethodDesc for this interface method based on the object we're invoking the
         // method on.
         //
-        pDE->m_targetCodeAddr = pDE->m_md->GetCallTarget(&objRef, pDE->m_ownerTypeHandle);
+        {
+            MethodTable *pMT = objRef->GetMethodTable();
+            GCX_PREEMP();
+            pDE->m_targetCodeAddr = pDE->m_md->GetCallTarget(&objRef, pMT, pDE->m_ownerTypeHandle);
+        }
 
         GCPROTECT_END();
     }
     else
     {
-        pDE->m_targetCodeAddr = pDE->m_md->GetCallTarget(NULL, pDE->m_ownerTypeHandle);
+        {
+            GCX_PREEMP();
+            pDE->m_targetCodeAddr = pDE->m_md->GetCallTarget(NULL, NULL, pDE->m_ownerTypeHandle);
+        }
     }
 
     //
@@ -2334,9 +2338,9 @@ void CopyArgsToBuffer(DebuggerEval *pDE,
         case ELEMENT_TYPE_U8:
         case ELEMENT_TYPE_R8:
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
-                *pDest = *(INT64*)(pFEAD->argAddr);
+                *pDest = *(INT64*)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
 #ifdef _DEBUG
                 if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
                 {
@@ -2409,18 +2413,18 @@ void CopyArgsToBuffer(DebuggerEval *pDE,
         case ELEMENT_TYPE_ARRAY:
         case ELEMENT_TYPE_SZARRAY:
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 if (!isByRef)
                 {
                     if (pFEAD->argIsHandleValue)
                     {
-                        OBJECTHANDLE oh = (OBJECTHANDLE)(pFEAD->argAddr);
+                        OBJECTHANDLE oh = (OBJECTHANDLE)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
                         *pDest = (INT64)(size_t)oh;
                     }
                     else
                     {
-                        *pDest = *((SIZE_T*)(pFEAD->argAddr));
+                        *pDest = *((SIZE_T*)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr));
                     }
 #ifdef _DEBUG
                     if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
@@ -2433,11 +2437,11 @@ void CopyArgsToBuffer(DebuggerEval *pDE,
                 {
                     if (pFEAD->argIsHandleValue)
                     {
-                        *pDest = (INT64)(size_t)(pFEAD->argAddr);
+                        *pDest = (INT64)(size_t)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
                     }
                     else
                     {
-                        *pDest = *(SIZE_T*)(pFEAD->argAddr);
+                        *pDest = *(SIZE_T*)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
                     }
 #ifdef _DEBUG
                     if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
@@ -2501,19 +2505,19 @@ void CopyArgsToBuffer(DebuggerEval *pDE,
         default:
             // 4-byte, 2-byte, or 1-byte values
 
-            if (pFEAD->argAddr != NULL)
+            if (pFEAD->argAddr != (CORDB_ADDRESS)0)
             {
                 if (!isByRef)
                 {
                     if (pFEAD->argIsHandleValue)
                     {
-                        OBJECTHANDLE oh = (OBJECTHANDLE)(pFEAD->argAddr);
+                        OBJECTHANDLE oh = (OBJECTHANDLE)CORDB_ADDRESS_TO_PTR(pFEAD->argAddr);
                         *pDest = (INT64)(size_t)oh;
                     }
                     else
                     {
                         GetAndSetLiteralValue(pDest, pFEArgInfo[currArgIndex].argSigType,
-                                              pFEAD->argAddr, pFEAD->argElementType);
+                                              CORDB_ADDRESS_TO_PTR(pFEAD->argAddr), pFEAD->argElementType);
                     }
 #ifdef _DEBUG
                     if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
@@ -2537,7 +2541,7 @@ void CopyArgsToBuffer(DebuggerEval *pDE,
                         // be bashing memory right next to the source value as the function being called acts upon some
                         // bigger value.
                         GetAndSetLiteralValue(pDest, pFEArgInfo[currArgIndex].byrefArgSigType,
-                                              pFEAD->argAddr, pFEAD->argElementType);
+                                              CORDB_ADDRESS_TO_PTR(pFEAD->argAddr), pFEAD->argElementType);
                     }
 #ifdef _DEBUG
                     if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
@@ -2570,7 +2574,7 @@ void CopyArgsToBuffer(DebuggerEval *pDE,
 
                 CorElementType relevantType = (isByRef ? pFEArgInfo[currArgIndex].byrefArgSigType : pFEArgInfo[currArgIndex].argSigType);
 
-                GetAndSetLiteralValue(pDest, relevantType, pFEAD->argLiteralData, pFEAD->argElementType);
+                GetAndSetLiteralValue(pDest, relevantType, CORDB_ADDRESS_TO_PTR(pFEAD->argLiteralData), pFEAD->argElementType);
 #ifdef _DEBUG
                 if (currArgIndex < MAX_DATA_LOCATIONS_TRACKED)
                 {
@@ -3199,7 +3203,10 @@ static void DoNormalFuncEval( DebuggerEval *pDE,
     // Now that all the args are protected, we can go back and deal with generic args and resolving
     // all their information.
     //
-    ResolveFuncEvalGenericArgInfo(pDE);
+    {
+        GCX_PREEMP();
+        ResolveFuncEvalGenericArgInfo(pDE);
+    }
 
     //
     // Grab the signature of the method we're working on and do some error checking.
@@ -3528,7 +3535,7 @@ static void GCProtectArgsAndDoNormalFuncEval(DebuggerEval *pDE,
     INT64 *pBufferForArgsArray = (INT64*)_alloca(cbAllocSize);
     memset(pBufferForArgsArray, 0, cbAllocSize);
 
-    FrameWithCookie<ProtectValueClassFrame> protectValueClassFrame;
+    ProtectValueClassFrame protectValueClassFrame;
 
     //
     // Initialize our tracking array
@@ -3583,7 +3590,7 @@ static void GCProtectArgsAndDoNormalFuncEval(DebuggerEval *pDE,
     }
     // Note: we need to catch all exceptions here because they all get reported as the result of
     // the funceval.  If a ThreadAbort occurred other than for a funcEval abort, we'll re-throw it manually.
-    EX_END_CATCH(SwallowAllExceptions);
+    EX_END_CATCH
 
     protectValueClassFrame.Pop();
 
@@ -3778,7 +3785,7 @@ void FuncEvalHijackRealWorker(DebuggerEval *pDE, Thread* pThread, FuncEvalFrame*
     }
     // Note: we need to catch all exceptioins here because they all get reported as the result of
     // the funceval.
-    EX_END_CATCH(SwallowAllExceptions);
+    EX_END_CATCH
 
     GCPROTECT_END();
 }
@@ -3826,7 +3833,7 @@ void * STDCALL FuncEvalHijackWorker(DebuggerEval *pDE)
 #endif
 #endif
 
-        if (!pDE->m_evalDuringException)
+        if (pDE->m_evalUsesHijack)
         {
             //
             // From this point forward we use FORBID regions to guard against GCs.
@@ -3846,7 +3853,7 @@ void * STDCALL FuncEvalHijackWorker(DebuggerEval *pDE)
 
         if (filterContext)
         {
-            _ASSERTE(pDE->m_evalDuringException);
+            _ASSERTE(!pDE->m_evalUsesHijack);
             g_pEEInterface->SetThreadFilterContext(pDE->m_thread, NULL);
         }
 
@@ -3861,7 +3868,7 @@ void * STDCALL FuncEvalHijackWorker(DebuggerEval *pDE)
     // Push our FuncEvalFrame. The return address is equal to the IP in the saved context in the DebuggerEval. The
     // m_Datum becomes the ptr to the DebuggerEval. The frame address also serves as the address of the catch-handler-found.
     //
-    FrameWithCookie<FuncEvalFrame> FEFrame(pDE, GetIP(&pDE->m_context), true);
+    FuncEvalFrame FEFrame(pDE, GetIP(&pDE->m_context), true);
     FEFrame.Push();
 
     // On ARM/ARM64 the single step flag is per-thread and not per context.  We need to make sure that the SS flag is cleared
@@ -3905,7 +3912,7 @@ void * STDCALL FuncEvalHijackWorker(DebuggerEval *pDE)
     // Codepitching can hijack our frame's return address. That means that we'll need to update PC in our saved context
     // so that when its restored, its like we've returned to the codepitching hijack. At this point, the old value of
     // EIP is worthless anyway.
-    if (!pDE->m_evalDuringException)
+    if (pDE->m_evalUsesHijack)
     {
         SetIP(&pDE->m_context, (SIZE_T)FEFrame.GetReturnAddress());
     }
@@ -3917,7 +3924,7 @@ void * STDCALL FuncEvalHijackWorker(DebuggerEval *pDE)
 
     void *dest = NULL;
 
-    if (!pDE->m_evalDuringException)
+    if (pDE->m_evalUsesHijack)
     {
         // Signal to the helper thread that we're done with our func eval.  Start by creating a DebuggerFuncEvalComplete
         // object. Give it an address at which to create the patch, which is a chunk of memory specified by our
@@ -3993,7 +4000,7 @@ void * STDCALL FuncEvalHijackWorker(DebuggerEval *pDE)
 }
 
 
-#if defined(FEATURE_EH_FUNCLETS) && !defined(TARGET_UNIX)
+#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
 
 EXTERN_C EXCEPTION_DISPOSITION
 FuncEvalHijackPersonalityRoutine(IN     PEXCEPTION_RECORD   pExceptionRecord,
@@ -4031,7 +4038,6 @@ FuncEvalHijackPersonalityRoutine(IN     PEXCEPTION_RECORD   pExceptionRecord,
     return ExceptionCollidedUnwind;
 }
 
-
-#endif // FEATURE_EH_FUNCLETS && !TARGET_UNIX
+#endif // !TARGET_UNIX && !TARGET_X86
 
 #endif // ifndef DACCESS_COMPILE

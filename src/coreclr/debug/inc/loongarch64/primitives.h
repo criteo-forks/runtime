@@ -16,6 +16,11 @@
 typedef const BYTE                  CORDB_ADDRESS_TYPE;
 typedef DPTR(CORDB_ADDRESS_TYPE)    PTR_CORDB_ADDRESS_TYPE;
 
+// Floating point registers are stored in a SIMD-capable layout (FPR64/LSX/LASX) where each register
+// occupies four 64-bit slots. FPRegister64 spans that slot so Get64bitFPRegisters strides correctly;
+// FPFillR8 reads the scalar value from the first 64 bits.
+typedef struct { ULONGLONG slots[4]; } FPRegister64;
+
 #define MAX_INSTRUCTION_LENGTH 4
 
 // Given a return address retrieved during stackwalk,
@@ -48,6 +53,7 @@ inline CORDB_ADDRESS GetPatchEndAddr(CORDB_ADDRESS patchAddr)
 
 constexpr CorDebugRegister g_JITToCorDbgReg[] =
 {
+    (CorDebugRegister)(255),
     REGISTER_LOONGARCH64_RA,
     REGISTER_LOONGARCH64_TP,
     REGISTER_LOONGARCH64_SP,
@@ -88,10 +94,10 @@ inline void CORDbgSetIP(DT_CONTEXT *context, LPVOID ip) {
     context->Pc = (DWORD64)ip;
 }
 
-inline LPVOID CORDbgGetSP(const DT_CONTEXT * context) {
+inline CORDB_ADDRESS CORDbgGetSP(const DT_CONTEXT * context) {
     LIMITED_METHOD_CONTRACT;
 
-    return (LPVOID)(size_t)(context->Sp);
+    return (CORDB_ADDRESS)(context->Sp);
 }
 
 inline void CORDbgSetSP(DT_CONTEXT *context, LPVOID esp) {
@@ -117,11 +123,8 @@ inline BOOL CompareControlRegisters(const DT_CONTEXT * pCtx1, const DT_CONTEXT *
 {
     LIMITED_METHOD_DAC_CONTRACT;
 
-    // TODO-LoongArch64: Sort out frame registers
-
     if ((pCtx1->Pc == pCtx2->Pc) &&
-        (pCtx1->Sp == pCtx2->Sp) &&
-        (pCtx1->Fp == pCtx2->Fp))
+        (pCtx1->Sp == pCtx2->Sp))
     {
         return TRUE;
     }
@@ -219,24 +222,15 @@ inline bool AddressIsBreakpoint(CORDB_ADDRESS_TYPE* address)
     return CORDbgGetInstruction(address) == CORDbg_BREAK_INSTRUCTION;
 }
 
-inline void SetSSFlag(DT_CONTEXT *pContext)
-{
-    // TODO-LoongArch64: LoongArch64 doesn't support cpsr.
-    _ASSERTE(!"unimplemented on LOONGARCH64 yet");
-}
+class Thread;
+// Enable single stepping.
+void SetSSFlag(DT_CONTEXT *pCtx, Thread *pThread);
 
-inline void UnsetSSFlag(DT_CONTEXT *pContext)
-{
-    // TODO-LoongArch64: LoongArch64 doesn't support cpsr.
-    _ASSERTE(!"unimplemented on LOONGARCH64 yet");
-}
+// Disable single stepping
+void UnsetSSFlag(DT_CONTEXT *pCtx, Thread *pThread);
 
-inline bool IsSSFlagEnabled(DT_CONTEXT * pContext)
-{
-    // TODO-LoongArch64: LoongArch64 doesn't support cpsr.
-    _ASSERTE(!"unimplemented on LOONGARCH64 yet");
-    return false;
-}
+// Check if single stepping is enabled.
+bool IsSSFlagEnabled(DT_CONTEXT *pCtx, Thread *pThread);
 
 
 inline bool PRDIsEqual(PRD_TYPE p1, PRD_TYPE p2)

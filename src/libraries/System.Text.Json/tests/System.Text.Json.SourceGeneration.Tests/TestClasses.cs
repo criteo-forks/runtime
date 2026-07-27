@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Primitives;
 
@@ -332,5 +333,39 @@ namespace System.Text.Json.SourceGeneration.Tests
         public string FieldWithCustomName;
 
         public new int ShadowProperty { get; set; }
+
+#pragma warning disable EXP0001
+        [JsonIgnore]
+        public ExperimentalClass ExperimentalProperty { get; set; }
+#pragma warning restore EXP0001
+    }
+
+#if NET
+    [Experimental("EXP0001")]
+#endif
+    public class ExperimentalClass;
+
+    public sealed class ClassWithConflictingIgnoredProperties
+    {
+        [JsonIgnore]
+        public List<string>? UserList { get; set; }
+
+        [JsonPropertyName("userlist")]
+        public List<string>? SystemTextJsonUserList { get; set; }
+
+        [JsonIgnore]
+        public List<string>? UserGroupsList { get; set; }
+
+        [JsonPropertyName("usergroupslist")]
+        public List<string>? SystemTextJsonUserGroupsList { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public List<string>? SystemTextJsonIPAddresses { get; set; }
+
+        [JsonIgnore]
+        public List<object>? QueryParams { get; set; }
+
+        [JsonPropertyName("queryparams")]
+        public List<object>? SystemTextJsonQueryParams { get; set; }
     }
 }

@@ -10,6 +10,7 @@ using System.Reflection.Metadata.Ecma335;
 using ILCompiler.DependencyAnalysis;
 
 using Internal.IL;
+using Internal.IL.Stubs;
 using Internal.TypeSystem;
 using Internal.TypeSystem.Ecma;
 
@@ -23,12 +24,16 @@ namespace ILCompiler
         private readonly ILProvider _nestedILProvider;
         private readonly SubstitutionProvider _substitutionProvider;
         private readonly DevirtualizationManager _devirtualizationManager;
+        private readonly MetadataManager _metadataManager;
+        private readonly HashSet<string> _characteristics;
 
-        public SubstitutedILProvider(ILProvider nestedILProvider, SubstitutionProvider substitutionProvider, DevirtualizationManager devirtualizationManager)
+        public SubstitutedILProvider(ILProvider nestedILProvider, SubstitutionProvider substitutionProvider, DevirtualizationManager devirtualizationManager, MetadataManager metadataManager = null, IEnumerable<string> characteristics = null)
         {
             _nestedILProvider = nestedILProvider;
             _substitutionProvider = substitutionProvider;
             _devirtualizationManager = devirtualizationManager;
+            _metadataManager = metadataManager;
+            _characteristics = characteristics != null ? new HashSet<string>(characteristics) : null;
         }
 
         public override MethodIL GetMethodIL(MethodDesc method)
@@ -37,6 +42,13 @@ namespace ILCompiler
             if (substitution != null)
             {
                 return substitution.EmitIL(method);
+            }
+
+            if (TryGetCharacteristicValue(method, out bool characteristicEnabled))
+            {
+                return new ILStubMethodIL(method,
+                    [characteristicEnabled ? (byte)ILOpCode.Ldc_i4_1 : (byte)ILOpCode.Ldc_i4_0, (byte)ILOpCode.Ret],
+                    [], []);
             }
 
             // BEGIN TEMPORARY WORKAROUND
@@ -253,6 +265,7 @@ namespace ILCompiler
                     continue;
 
                 TypeEqualityPatternAnalyzer typeEqualityAnalyzer = default;
+                IsInstCheckPatternAnalyzer isInstCheckAnalyzer = default;
 
                 ILReader reader = new ILReader(methodBytes, offset);
                 while (reader.HasNext)
@@ -262,6 +275,7 @@ namespace ILCompiler
                     ILOpcode opcode = reader.ReadILOpcode();
 
                     typeEqualityAnalyzer.Advance(opcode, reader, method);
+                    isInstCheckAnalyzer.Advance(opcode, reader, method);
 
                     // Mark any applicable EH blocks
                     foreach (ILExceptionRegion ehRegion in ehRegions)
@@ -302,7 +316,8 @@ namespace ILCompiler
                     {
                         int destination = reader.ReadBranchDestination(opcode);
                         if (!TryGetConstantArgument(method, methodBytes, flags, offset, 0, out int constant)
-                            && !TryExpandTypeEquality(typeEqualityAnalyzer, method, out constant))
+                            && !TryExpandTypeEquality(typeEqualityAnalyzer, method, out constant)
+                            && !TryExpandIsInst(isInstCheckAnalyzer, method, out constant))
                         {
                             // Can't get the constant - both branches are live.
                             offsetsToVisit.Push(destination);
@@ -402,7 +417,7 @@ namespace ILCompiler
                             && calleeType.Name == InlineableStringsResourceNode.ResourceAccessorTypeName
                             && calleeType.Namespace == InlineableStringsResourceNode.ResourceAccessorTypeNamespace
                             && callee.Signature is { Length: 0, IsStatic: true }
-                            && callee.Name.StartsWith("get_", StringComparison.Ordinal))
+                            && callee.Name.StartsWith("get_"u8))
                         {
                             flags[offset] |= OpcodeFlags.GetResourceStringCall;
                             hasGetResourceStringCall = true;
@@ -659,6 +674,122 @@ namespace ILCompiler
             return new SubstitutedMethodIL(method.GetMethodILDefinition(), newBody, newEHRegions.ToArray(), debugInfo, newStrings.ToArray());
         }
 
+        private bool TryGetMethodConstantValue(MethodDesc method, out int constant, int level = 0)
+        {
+            method = method.GetTypicalMethodDefinition();
+
+            TypeFlags returnType = method.Signature.ReturnType.UnderlyingType.Category;
+            if (returnType is < TypeFlags.Boolean or > TypeFlags.UInt32
+                || method.IsIntrinsic
+                || method.IsNoInlining
+                || method.IsNoOptimization
+                || _nestedILProvider.GetMethodIL(method) is not MethodIL methodIL
+                || methodIL.GetExceptionRegions().Length > 0)
+            {
+                return Fail(out constant);
+            }
+
+            Stack<int?> stack = new Stack<int?>(methodIL.MaxStack);
+
+            int instructionCounter = 0;
+
+            var reader = new ILReader(methodIL.GetILBytes());
+            while (reader.HasNext && instructionCounter++ < 1000)
+            {
+                var opcode = reader.ReadILOpcode();
+                switch (opcode)
+                {
+                    case ILOpcode.ldc_i4: stack.Push((int)reader.ReadILUInt32()); break;
+                    case ILOpcode.ldc_i4_s: stack.Push((sbyte)reader.ReadILByte()); break;
+                    case >= ILOpcode.ldc_i4_0 and <= ILOpcode.ldc_i4_8: stack.Push(opcode - ILOpcode.ldc_i4_0); break;
+                    case ILOpcode.ldc_i4_m1: stack.Push(-1); break;
+
+                    case ILOpcode.ldsfld:
+                    {
+                        reader.ReadILToken();
+                        stack.Push(null);
+                        break;
+                    }
+
+                    case ILOpcode.brtrue:
+                    case ILOpcode.brtrue_s:
+                    case ILOpcode.brfalse:
+                    case ILOpcode.brfalse_s:
+                    {
+                        if (!stack.TryPop(out int? val) || !val.HasValue)
+                            return Fail(out constant);
+
+                        bool taken = ((opcode is ILOpcode.brtrue or ILOpcode.brtrue_s) && val.Value != 0)
+                            || ((opcode is ILOpcode.brfalse or ILOpcode.brfalse_s) && val.Value == 0);
+
+                        int destOffset = reader.ReadBranchDestination(opcode);
+                        if (taken)
+                            reader.Seek(destOffset);
+                        break;
+                    }
+
+                    case ILOpcode.br:
+                    case ILOpcode.br_s:
+                        reader.Seek(reader.ReadBranchDestination(opcode));
+                        break;
+
+                    // Callvirt could trigger a NullRef. We ignore that here. It is fine because we only need to know
+                    // what the method would return if it didn't throw. If it throws, it doesn't matter because
+                    // we do not eliminate the call to it, only the basic block conditioned on the call return value.
+                    case ILOpcode.callvirt:
+                    case ILOpcode.call:
+                    {
+                        MethodDesc callee = (MethodDesc)methodIL.GetObject(reader.ReadILToken());
+                        if (opcode == ILOpcode.callvirt && callee.IsVirtual)
+                            return Fail(out constant);
+
+                        for (int i = 0; i < callee.Signature.Length + (callee.Signature.IsStatic ? 0 : 1); i++)
+                            if (!stack.TryPop(out _))
+                                return Fail(out constant);
+
+                        BodySubstitution substitution = _substitutionProvider.GetSubstitution(callee);
+                        if (substitution != null && substitution.Value is int c)
+                        {
+                            constant = c;
+                        }
+                        else if (level > 4
+                            || !TryGetMethodConstantValue(callee, out constant, level + 1))
+                        {
+                            return Fail(out constant);
+                        }
+
+                        stack.Push(constant);
+                        break;
+                    }
+
+                    case ILOpcode.ret:
+                    {
+                        Debug.Assert(stack.Count == 1);
+                        if (stack.Count == 0)
+                            return Fail(out constant);
+
+                        int? ret = stack.Pop();
+                        if (!ret.HasValue)
+                            return Fail(out constant);
+
+                        constant = ret.Value;
+                        return true;
+                    }
+
+                    default:
+                        return Fail(out constant);
+                }
+            }
+
+            return Fail(out constant);
+
+            static bool Fail(out int constant)
+            {
+                constant = 0;
+                return false;
+            }
+        }
+
         private bool TryGetConstantArgument(MethodIL methodIL, byte[] body, OpcodeFlags[] flags, int offset, int argIndex, out int constant)
         {
             if ((flags[offset] & OpcodeFlags.BasicBlockStart) != 0)
@@ -681,16 +812,26 @@ namespace ILCompiler
                     {
                         BodySubstitution substitution = _substitutionProvider.GetSubstitution(method);
                         if (substitution != null && substitution.Value is int
-                            && (opcode != ILOpcode.callvirt || !method.IsVirtual))
+                            && ((opcode != ILOpcode.callvirt && !method.Signature.IsStatic) || !method.IsVirtual))
                         {
                             constant = (int)substitution.Value;
                             return true;
                         }
-                        else if (method.IsIntrinsic && method.Name is "get_IsValueType" or "get_IsEnum"
-                            && method.OwningType is MetadataType mdt
-                            && mdt.Name == "Type" && mdt.Namespace == "System" && mdt.Module == mdt.Context.SystemModule
-                            && TryExpandTypeIs(methodIL, body, flags, currentOffset, method.Name, out constant))
+                        if (((opcode != ILOpcode.callvirt && !method.Signature.IsStatic) || !method.IsVirtual)
+                            && TryGetMethodConstantValue(method, out constant))
                         {
+                            return true;
+                        }
+                        else if (method.IsIntrinsic && (method.Name == "get_IsValueType"u8 || method.Name == "get_IsEnum"u8)
+                            && method.OwningType is MetadataType mdt
+                            && mdt.Name == "Type"u8 && mdt.Namespace == "System"u8 && mdt.Module == mdt.Context.SystemModule
+                            && TryExpandTypeIs(methodIL, body, flags, currentOffset, method.GetName(), out constant))
+                        {
+                            return true;
+                        }
+                        else if (TryGetCharacteristicValue(method, out bool characteristic))
+                        {
+                            constant = characteristic ? 1 : 0;
                             return true;
                         }
                         else
@@ -919,7 +1060,13 @@ namespace ILCompiler
                 if (!ConstructedEETypeNode.CreationAllowed(knownType))
                     return false;
 
+                // If a constructed MethodTable for this type exists, the comparison could succeed.
                 if (_devirtualizationManager.CanReferenceConstructedTypeOrCanonicalFormOfType(knownType.NormalizeInstantiation()))
+                    return false;
+
+                // If we can have metadata for the type the comparison could succeed even if no MethodTable present.
+                // (This is the case of metadata-only types, where we were able to optimize the MethodTable away.)
+                if (_metadataManager != null && knownType.GetTypeDefinition() is MetadataType mdType && _metadataManager.CanGenerateMetadata(mdType))
                     return false;
 
                 constant = 0;
@@ -927,6 +1074,39 @@ namespace ILCompiler
 
             if (analyzer.IsInequality)
                 constant ^= 1;
+
+            return true;
+        }
+
+        private bool TryExpandIsInst(in IsInstCheckPatternAnalyzer analyzer, MethodIL methodIL, out int constant)
+        {
+            constant = 0;
+            if (!analyzer.IsIsInstBranch)
+                return false;
+
+            var type = (TypeDesc)methodIL.GetObject(analyzer.Token);
+
+            // Dataflow runs on top of uninstantiated IL and we can't answer some questions there.
+            // Unfortunately this means dataflow will still see code that the rest of the system
+            // might have optimized away. It should not be a problem in practice.
+            if (type.ContainsSignatureVariables())
+                return false;
+
+            if (type.IsCanonicalDefinitionType(CanonicalFormKind.Any))
+                return false;
+
+            // We don't track types without a constructed MethodTable very well.
+            if (!ConstructedEETypeNode.CreationAllowed(type))
+                return false;
+
+            if (_devirtualizationManager.CanReferenceConstructedTypeOrCanonicalFormOfType(type.NormalizeInstantiation()))
+                return false;
+
+            // Above check took care of most variant scenarios but we still need to worry about array variance
+            if (((CompilerTypeSystemContext)type.Context).IsArrayVariantCastable(type))
+                return false;
+
+            constant = 0;
 
             return true;
         }
@@ -953,13 +1133,26 @@ namespace ILCompiler
 
             MethodDesc method = (MethodDesc)methodIL.GetObject(reader.ReadILToken());
 
-            if (!method.IsIntrinsic || method.Name != "GetTypeFromHandle")
+            if (!method.IsIntrinsic || method.Name != "GetTypeFromHandle"u8)
                 return false;
 
             if ((flags[reader.Offset] & OpcodeFlags.BasicBlockStart) != 0)
                 return false;
 
             return true;
+        }
+
+        private bool TryGetCharacteristicValue(MethodDesc maybeCharacteristicMethod, out bool value)
+        {
+            if (maybeCharacteristicMethod.IsIntrinsic
+                && maybeCharacteristicMethod.HasCustomAttribute("System.Runtime.CompilerServices", "AnalysisCharacteristicAttribute"))
+            {
+                value = _characteristics == null || _characteristics.Contains(maybeCharacteristicMethod.GetName());
+                return true;
+            }
+
+            value = false;
+            return false;
         }
 
         private sealed class SubstitutedMethodIL : MethodIL

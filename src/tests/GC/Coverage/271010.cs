@@ -2,15 +2,23 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 /* DESCRIPTION: regression test for VSWhidbey 271010
+using TestLibrary;
  *              Should throw OOM
  */
 
 using System;
 using System.Runtime.CompilerServices;
+using Xunit;
 
 public class Test_271010 {
 
-    public static int Main() {
+    public static bool IsCoreClrOnNonBrowser =>
+        TestLibrary.PlatformDetection.IsCoreCLR &&
+        !TestLibrary.PlatformDetection.IsBrowser;
+
+    [ActiveIssue("https://github.com/dotnet/runtime/issues/5933", typeof(Test_271010), nameof(IsCoreClrOnNonBrowser))]
+    [Fact]
+    public static int TestEntryPoint() {
 
         int[][] otherarray;
 

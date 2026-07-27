@@ -369,6 +369,7 @@ namespace System.Net
                     SecurityStatusPalErrorCode.TimeSkew => NegotiateAuthenticationStatusCode.InvalidToken,
                     SecurityStatusPalErrorCode.AlgorithmMismatch => NegotiateAuthenticationStatusCode.InvalidToken,
                     SecurityStatusPalErrorCode.CertUnknown => NegotiateAuthenticationStatusCode.UnknownCredentials,
+                    SecurityStatusPalErrorCode.TargetUnknown => NegotiateAuthenticationStatusCode.TargetUnknown,
 
                     // Processing partial inputs is not supported, so this is result of incorrect input
                     SecurityStatusPalErrorCode.IncompleteMessage => NegotiateAuthenticationStatusCode.InvalidToken,
@@ -587,8 +588,7 @@ namespace System.Net
                             pBuffers = unmanagedBuffer
                         };
 
-                        uint qop = IsEncrypted ? 0 : Interop.SspiCli.SECQOP_WRAP_NO_ENCRYPT;
-                        int errorCode = Interop.SspiCli.MakeSignature(ref _securityContext._handle, qop, ref sdcInOut, 0);
+                        int errorCode = Interop.SspiCli.MakeSignature(ref _securityContext._handle, 0, ref sdcInOut, 0);
 
                         if (errorCode != 0)
                         {

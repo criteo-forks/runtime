@@ -32,8 +32,6 @@ namespace System.Reflection.Emit
 
         public override void SetConstant(object? defaultValue)
         {
-            Type parameterType = _position == 0 ? _methodBuilder.ReturnType : _methodBuilder.ParameterTypes![_position - 1];
-            FieldBuilderImpl.ValidateDefaultValueType(defaultValue, parameterType);
             _defaultValue = defaultValue;
             _attributes |= ParameterAttributes.HasDefault;
         }
@@ -70,8 +68,7 @@ namespace System.Reflection.Emit
     internal sealed class ParameterInfoWrapper : ParameterInfo
     {
         private readonly ParameterBuilderImpl _pb;
-        private readonly Type _type
-;
+        private readonly Type _type;
         public ParameterInfoWrapper(ParameterBuilderImpl pb, Type type)
         {
             _pb = pb;
@@ -89,5 +86,7 @@ namespace System.Reflection.Emit
         public override bool HasDefaultValue => _pb._defaultValue != DBNull.Value;
 
         public override object? DefaultValue => HasDefaultValue ? _pb._defaultValue : null;
+
+        public override Type GetModifiedParameterType() => ParameterType;
     }
 }

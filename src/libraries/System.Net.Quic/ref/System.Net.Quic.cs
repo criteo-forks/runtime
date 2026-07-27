@@ -29,6 +29,9 @@ namespace System.Net.Quic
         public static bool IsSupported { get { throw null; } }
         public System.Net.IPEndPoint LocalEndPoint { get { throw null; } }
         public System.Net.Security.SslApplicationProtocol NegotiatedApplicationProtocol { get { throw null; } }
+        [System.CLSCompliantAttribute(false)]
+        public System.Net.Security.TlsCipherSuite NegotiatedCipherSuite { get { throw null; } }
+        public System.Security.Authentication.SslProtocols SslProtocol { get { throw null; } }
         public System.Security.Cryptography.X509Certificates.X509Certificate? RemoteCertificate { get { throw null; } }
         public System.Net.IPEndPoint RemoteEndPoint { get { throw null; } }
         public string TargetHostName { get { throw null; } }
@@ -111,6 +114,7 @@ namespace System.Net.Quic
     public sealed partial class QuicStream : System.IO.Stream
     {
         internal QuicStream() { }
+        public const byte DefaultPriority = (byte)127;
         public override bool CanRead { get { throw null; } }
         public override bool CanSeek { get { throw null; } }
         public override bool CanTimeout { get { throw null; } }
@@ -118,6 +122,7 @@ namespace System.Net.Quic
         public long Id { get { throw null; } }
         public override long Length { get { throw null; } }
         public override long Position { get { throw null; } set { } }
+        public byte Priority { get { throw null; } set { } }
         public System.Threading.Tasks.Task ReadsClosed { get { throw null; } }
         public override int ReadTimeout { get { throw null; } set { } }
         public System.Net.Quic.QuicStreamType Type { get { throw null; } }

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
+using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 
 namespace System.Text.Json.Serialization.Tests
@@ -490,7 +491,9 @@ namespace System.Text.Json.Serialization.Tests
             public required int RequiredField;
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsReflectionEmitSupported))]
+        [RequiresUnreferencedCode("Uses JsonTypeInfo.CreateJsonPropertyInfo which requires reflection.")]
+        [RequiresDynamicCode("Uses JsonTypeInfo.CreateJsonPropertyInfo which requires reflection.")]
         public async Task RemovingPropertiesWithRequiredKeywordAllowsDeserialization()
         {
             JsonSerializerOptions options = Serializer.GetDefaultOptionsWithMetadataModifier(static ti =>
@@ -727,12 +730,26 @@ namespace System.Text.Json.Serialization.Tests
             };
         }
 
-        private static JsonTypeInfo GetTypeInfo<T>(JsonSerializerOptions options)
+        [Fact]
+        public async Task ClassWithNullValidatingConstructor_ValidatesRequiredParameterBeforeCallingCtor()
         {
-            options.TypeInfoResolver ??= JsonSerializerOptions.Default.TypeInfoResolver;
-            options.MakeReadOnly();
-            return options.GetTypeInfo(typeof(T));
+            // Regression test for https://github.com/dotnet/runtime/issues/107065
+            JsonSerializerOptions options = new(Serializer.DefaultOptions) { RespectRequiredConstructorParameters = true };
+            JsonException ex = await Assert.ThrowsAsync<JsonException>(() => Serializer.DeserializeWrapper<ClassWithNullValidatingConstructor>("{}", options));
+            Assert.Null(ex.InnerException);
         }
+
+        public class ClassWithNullValidatingConstructor
+        {
+            public ClassWithNullValidatingConstructor(string value)
+            {
+                Value = value ?? throw new ArgumentNullException(nameof(value));
+            }
+
+            public string Value { get; }
+        }
+
+        private JsonTypeInfo GetTypeInfo<T>(JsonSerializerOptions options) => Serializer.GetTypeInfo<T>(options);
 
         private static void AssertJsonTypeInfoHasRequiredProperties(JsonTypeInfo typeInfo, params string[] requiredProperties)
         {

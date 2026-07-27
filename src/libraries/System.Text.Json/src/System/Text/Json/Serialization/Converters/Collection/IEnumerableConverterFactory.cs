@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json.Reflection;
+using System.Text.Json.Serialization.Metadata;
 
 namespace System.Text.Json.Serialization.Converters
 {
@@ -107,6 +108,14 @@ namespace System.Text.Json.Serialization.Converters
                 converterType = typeof(ISetOfTConverter<,>);
                 elementType = actualTypeToConvert.GetGenericArguments()[0];
             }
+#if NET
+            // IReadOnlySet<>
+            else if ((actualTypeToConvert = typeToConvert.GetCompatibleGenericInterface(typeof(IReadOnlySet<>))) != null)
+            {
+                converterType = typeof(IReadOnlySetOfTConverter<,>);
+                elementType = actualTypeToConvert.GetGenericArguments()[0];
+            }
+#endif
             // ICollection<>
             else if ((actualTypeToConvert = typeToConvert.GetCompatibleGenericInterface(typeof(ICollection<>))) != null)
             {
@@ -185,11 +194,17 @@ namespace System.Text.Json.Serialization.Converters
             }
             else if (numberOfGenericArgs == 2)
             {
+                JsonTypeInfo.ValidateType(elementType!);
+
                 genericType = converterType.MakeGenericType(typeToConvert, elementType!);
             }
             else
             {
                 Debug.Assert(numberOfGenericArgs == 3);
+
+                JsonTypeInfo.ValidateType(elementType!);
+                JsonTypeInfo.ValidateType(dictionaryKeyType!);
+
                 genericType = converterType.MakeGenericType(typeToConvert, dictionaryKeyType!, elementType!);
             }
 

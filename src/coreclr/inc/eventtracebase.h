@@ -31,6 +31,7 @@ struct EventStructTypeData;
 void InitializeEventTracing();
 
 class PrepareCodeConfig;
+class CodeHeapIterator;
 
 // !!!!!!! NOTE !!!!!!!!
 // The flags must match those in the ETW manifest exactly
@@ -120,16 +121,20 @@ enum EtwGCSettingFlags
 #define ETWFireEvent(EventName) FireEtw##EventName(GetClrInstanceId())
 
 #define ETW_TRACING_INITIALIZED(RegHandle) (TRUE)
+#if defined(FEATURE_EVENTSOURCE_XPLAT)
 #define ETW_EVENT_ENABLED(Context, EventDescriptor) (EventPipeHelper::IsEnabled(Context, EventDescriptor.Level, EventDescriptor.Keyword) || \
-        (XplatEventLogger::IsKeywordEnabled(Context, EventDescriptor.Level, EventDescriptor.Keyword)) || \
-        (UserEventsHelper::IsEnabled(Context, EventDescriptor.Level, EventDescriptor.Keyword)))
+        (XplatEventLogger::IsKeywordEnabled(Context, EventDescriptor.Level, EventDescriptor.Keyword)))
 #define ETW_CATEGORY_ENABLED(Context, Level, Keyword) (EventPipeHelper::IsEnabled(Context, Level, Keyword) || \
-        (XplatEventLogger::IsKeywordEnabled(Context, Level, Keyword)) || \
-        (UserEventsHelper::IsEnabled(Context, Level, Keyword)))
+        (XplatEventLogger::IsKeywordEnabled(Context, Level, Keyword)))
 #define ETW_TRACING_ENABLED(Context, EventDescriptor) (EventEnabled##EventDescriptor())
 #define ETW_TRACING_CATEGORY_ENABLED(Context, Level, Keyword) (EventPipeHelper::IsEnabled(Context, Level, Keyword) || \
-        (XplatEventLogger::IsKeywordEnabled(Context, Level, Keyword)) || \
-        (UserEventsHelper::IsEnabled(Context, Level, Keyword)))
+        (XplatEventLogger::IsKeywordEnabled(Context, Level, Keyword)))
+#else // FEATURE_EVENTSOURCE_XPLAT
+#define ETW_EVENT_ENABLED(Context, EventDescriptor) (EventPipeHelper::IsEnabled(Context, EventDescriptor.Level, EventDescriptor.Keyword))
+#define ETW_CATEGORY_ENABLED(Context, Level, Keyword) (EventPipeHelper::IsEnabled(Context, Level, Keyword))
+#define ETW_TRACING_ENABLED(Context, EventDescriptor) (EventEnabled##EventDescriptor())
+#define ETW_TRACING_CATEGORY_ENABLED(Context, Level, Keyword) (EventPipeHelper::IsEnabled(Context, Level, Keyword))
+#endif // FEATURE_EVENTSOURCE_XPLAT
 #define ETW_PROVIDER_ENABLED(ProviderSymbol) (TRUE)
 #else //defined(FEATURE_PERFTRACING)
 #define ETW_INLINE
@@ -224,6 +229,15 @@ struct ProfilingScanContext;
 #include <evntrace.h>
 #include <evntprov.h>
 #endif //!FEATURE_NATIVEAOT
+#else // !defined(HOST_UNIX)
+
+//
+// ETW and EventPipe Event Notification Callback Control Code Keywords
+//
+#define EVENT_CONTROL_CODE_DISABLE_PROVIDER 0
+#define EVENT_CONTROL_CODE_ENABLE_PROVIDER 1
+#define EVENT_CONTROL_CODE_CAPTURE_STATE 2
+
 #endif //!defined(HOST_UNIX)
 
 
@@ -241,16 +255,11 @@ struct ProfilingScanContext;
 extern UINT32 g_nClrInstanceId;
 
 #define GetClrInstanceId()  (static_cast<UINT16>(g_nClrInstanceId))
-#if defined(HOST_UNIX) && (defined(FEATURE_EVENT_TRACE) || defined(FEATURE_EVENTSOURCE_XPLAT))
+#if defined(HOST_UNIX) && defined(FEATURE_EVENT_TRACE)
 #define KEYWORDZERO 0x0
-
-#define DEF_LTTNG_KEYWORD_ENABLED 1
-#ifdef FEATURE_EVENT_TRACE
 #include "clrproviders.h"
-#endif // FEATURE_EVENT_TRACE
 #include "clrconfig.h"
-
-#endif // defined(HOST_UNIX) && (defined(FEATURE_EVENT_TRACE) || defined(FEATURE_EVENTSOURCE_XPLAT))
+#endif // defined(HOST_UNIX) && defined(FEATURE_EVENT_TRACE)
 
 #if defined(FEATURE_PERFTRACING) || defined(FEATURE_EVENTSOURCE_XPLAT)
 
@@ -409,7 +418,7 @@ private:
 };
 #endif // defined(FEATURE_PERFTRACING) || defined(FEATURE_EVENTSOURCE_XPLAT)
 
-#if defined(HOST_UNIX) && (defined(FEATURE_EVENT_TRACE) || defined(FEATURE_EVENTSOURCE_XPLAT))
+#if defined(FEATURE_EVENTSOURCE_XPLAT)
 
 class XplatEventLoggerController
 {
@@ -429,7 +438,7 @@ public:
         {
             ActivateAllKeywordsOfAllProviders();
         }
-#ifdef FEATURE_EVENT_TRACE
+#if defined(FEATURE_EVENT_TRACE) && defined(HOST_UNIX)
         else
         {
             LTTNG_TRACE_CONTEXT *provider = GetProvider(providerName);
@@ -446,7 +455,7 @@ public:
 
     static void ActivateAllKeywordsOfAllProviders()
     {
-#ifdef FEATURE_EVENT_TRACE
+#if defined(FEATURE_EVENT_TRACE) && defined(HOST_UNIX)
         for (LTTNG_TRACE_CONTEXT * const provider : ALL_LTTNG_PROVIDERS_CONTEXT)
         {
             provider->EnabledKeywordsBitmask = (ULONGLONG)(-1);
@@ -457,7 +466,7 @@ public:
     }
 
 private:
-#ifdef FEATURE_EVENT_TRACE
+#if defined(FEATURE_EVENT_TRACE) && defined(HOST_UNIX)
     static LTTNG_TRACE_CONTEXT * const GetProvider(LPCWSTR providerName)
     {
         auto length = u16_strlen(providerName);
@@ -483,7 +492,7 @@ public:
         return configEventLogging.val(CLRConfig::EXTERNAL_EnableEventLog);
     }
 
-#ifdef FEATURE_EVENT_TRACE
+#if defined(FEATURE_EVENT_TRACE) && defined(HOST_UNIX)
     inline static bool IsProviderEnabled(DOTNET_TRACE_CONTEXT providerCtx)
     {
         return providerCtx.LttngProvider->IsEnabled;
@@ -550,7 +559,7 @@ public:
 };
 
 
-#endif  // defined(HOST_UNIX) && (defined(FEATURE_EVENT_TRACE) || defined(FEATURE_EVENTSOURCE_XPLAT))
+#endif  // defined(FEATURE_EVENTSOURCE_XPLAT)
 
 #if defined(FEATURE_EVENT_TRACE)
 
@@ -654,13 +663,6 @@ public:
     static bool Enabled();
     static bool IsEnabled(DOTNET_TRACE_CONTEXT Context, UCHAR Level, ULONGLONG Keyword);
 };
-
-class UserEventsHelper
-{
-public:
-    static bool Enabled();
-    static bool IsEnabled(DOTNET_TRACE_CONTEXT Context, UCHAR Level, ULONGLONG Keyword);
-};
 #endif // defined(FEATURE_PERFTRACING)
 
 #endif // FEATURE_EVENT_TRACE
@@ -689,7 +691,6 @@ class Module;
 class Assembly;
 class MethodDesc;
 class MethodTable;
-class BaseDomain;
 class AppDomain;
 class SString;
 class CrawlFrame;
@@ -750,12 +751,11 @@ namespace ETW
 #ifdef FEATURE_EVENT_TRACE
         static VOID SendThreadRundownEvent();
         static VOID SendGCRundownEvent();
-        static VOID IterateDomain(BaseDomain *pDomain, DWORD enumerationOptions);
-        static VOID IterateAppDomain(AppDomain * pAppDomain, DWORD enumerationOptions);
+        static VOID IterateAppDomain(DWORD enumerationOptions);
         static VOID IterateCollectibleLoaderAllocator(AssemblyLoaderAllocator *pLoaderAllocator, DWORD enumerationOptions);
         static VOID IterateAssembly(Assembly *pAssembly, DWORD enumerationOptions);
         static VOID IterateModule(Module *pModule, DWORD enumerationOptions);
-        static VOID EnumerationHelper(Module *moduleFilter, BaseDomain *domainFilter, DWORD enumerationOptions);
+        static VOID EnumerationHelper(Module *moduleFilter, DWORD enumerationOptions);
         static DWORD GetEnumerationOptionsFromRuntimeKeywords();
     public:
         typedef union _EnumerationStructs
@@ -839,7 +839,7 @@ namespace ETW
         static VOID SendModuleEvent(Module *pModule, DWORD dwEventOptions, BOOL bFireDomainModuleEvents=FALSE);
         static ULONG SendModuleRange(_In_ Module *pModule, _In_ DWORD dwEventOptions);
         static VOID SendAssemblyEvent(Assembly *pAssembly, DWORD dwEventOptions);
-        static VOID SendDomainEvent(BaseDomain *pBaseDomain, DWORD dwEventOptions, LPCWSTR wszFriendlyName=NULL);
+        static VOID SendDomainEvent(DWORD dwEventOptions, LPCWSTR wszFriendlyName=NULL);
     public:
         typedef union _LoaderStructs
         {
@@ -877,23 +877,21 @@ namespace ETW
 
         }LoaderStructs;
 
-        static VOID DomainLoadReal(BaseDomain *pDomain, _In_opt_ LPWSTR wszFriendlyName=NULL);
+        static VOID DomainLoadReal(_In_opt_ LPWSTR wszFriendlyName=NULL);
 
-        static VOID DomainLoad(BaseDomain *pDomain, _In_opt_ LPWSTR wszFriendlyName = NULL)
+        static VOID DomainLoad(_In_opt_ LPWSTR wszFriendlyName = NULL)
         {
             if (ETW_PROVIDER_ENABLED(MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER))
             {
-                DomainLoadReal(pDomain, wszFriendlyName);
+                DomainLoadReal(wszFriendlyName);
             }
         }
 
-        static VOID DomainUnload(AppDomain *pDomain);
         static VOID CollectibleLoaderAllocatorUnload(AssemblyLoaderAllocator *pLoaderAllocator);
         static VOID ModuleLoad(Module *pModule, LONG liReportedSharedModule);
 #else
     public:
-        static VOID DomainLoad(BaseDomain *pDomain, _In_opt_ LPWSTR wszFriendlyName=NULL) {};
-        static VOID DomainUnload(AppDomain *pDomain) {};
+        static VOID DomainLoad(_In_opt_ LPWSTR wszFriendlyName=NULL) {};
         static VOID CollectibleLoaderAllocatorUnload(AssemblyLoaderAllocator *pLoaderAllocator) {};
         static VOID ModuleLoad(Module *pModule, LONG liReportedSharedModule) {};
 #endif // FEATURE_EVENT_TRACE
@@ -904,9 +902,19 @@ namespace ETW
     {
         friend class ETW::EnumerationLog;
 #ifdef FEATURE_EVENT_TRACE
-        static VOID SendEventsForJitMethods(BaseDomain *pDomainFilter, LoaderAllocator *pLoaderAllocatorFilter, DWORD dwEventOptions);
+        static VOID SendEventsForJitMethods(BOOL getCodeVersionIds, LoaderAllocator *pLoaderAllocatorFilter, DWORD dwEventOptions);
         static VOID SendEventsForJitMethodsHelper(
             LoaderAllocator *pLoaderAllocatorFilter,
+            DWORD dwEventOptions,
+            BOOL fLoadOrDCStart,
+            BOOL fUnloadOrDCEnd,
+            BOOL fSendMethodEvent,
+            BOOL fSendILToNativeMapEvent,
+            BOOL fSendRichDebugInfoEvent,
+            BOOL fGetCodeIds);
+
+        static VOID SendEventsForJitMethodsHelper2(
+            CodeHeapIterator codeHeapIterator,
             DWORD dwEventOptions,
             BOOL fLoadOrDCStart,
             BOOL fUnloadOrDCEnd,
@@ -953,9 +961,7 @@ namespace ETW
         static VOID SendMethodDetailsEvent(MethodDesc *pMethodDesc);
         static VOID SendNonDuplicateMethodDetailsEvent(MethodDesc* pMethodDesc, MethodDescSet* set);
         static VOID StubInitialized(ULONGLONG ullHelperStartAddress, LPCWSTR pHelperName);
-        static VOID StubsInitialized(PVOID *pHelperStartAddress, PVOID *pHelperNames, LONG ulNoOfHelpers);
         static VOID MethodRestored(MethodDesc * pMethodDesc);
-        static VOID MethodTableRestored(MethodTable * pMethodTable);
         static VOID DynamicMethodDestroyed(MethodDesc *pMethodDesc);
         static VOID LogMethodInstrumentationData(MethodDesc* method, uint32_t cbData, BYTE *data, TypeHandle* pTypeHandles, uint32_t numTypeHandles, MethodDesc** pMethods, uint32_t numMethods);
 #else // FEATURE_EVENT_TRACE
@@ -965,154 +971,10 @@ namespace ETW
         static VOID MethodJitting(MethodDesc *pMethodDesc, COR_ILMETHOD_DECODER* methodDecoder, SString *namespaceOrClassName, SString *methodName, SString *methodSignature);
         static VOID MethodJitted(MethodDesc *pMethodDesc, SString *namespaceOrClassName, SString *methodName, SString *methodSignature, PCODE pNativeCodeStartAddress, PrepareCodeConfig *pConfig);
         static VOID StubInitialized(ULONGLONG ullHelperStartAddress, LPCWSTR pHelperName) {};
-        static VOID StubsInitialized(PVOID *pHelperStartAddress, PVOID *pHelperNames, LONG ulNoOfHelpers) {};
         static VOID MethodRestored(MethodDesc * pMethodDesc) {};
-        static VOID MethodTableRestored(MethodTable * pMethodTable) {};
         static VOID DynamicMethodDestroyed(MethodDesc *pMethodDesc) {};
         static VOID LogMethodInstrumentationData(MethodDesc* method, uint32_t cbData, BYTE *data, TypeHandle* pTypeHandles, uint32_t numTypeHandles, MethodDesc** pMethods, uint32_t numMethods) {};
 #endif // FEATURE_EVENT_TRACE
-    };
-
-    // Class to wrap all Security logic for ETW
-    class SecurityLog
-    {
-#ifdef FEATURE_EVENT_TRACE
-    public:
-        static VOID StrongNameVerificationStart(DWORD dwInFlags, _In_ LPWSTR strFullyQualifiedAssemblyName);
-        static VOID StrongNameVerificationStop(DWORD dwInFlags,ULONG result, _In_ LPWSTR strFullyQualifiedAssemblyName);
-
-        static void FireFieldTransparencyComputationStart(LPCWSTR wszFieldName,
-                                                          LPCWSTR wszModuleName,
-                                                          DWORD dwAppDomain);
-        static void FireFieldTransparencyComputationEnd(LPCWSTR wszFieldName,
-                                                        LPCWSTR wszModuleName,
-                                                        DWORD dwAppDomain,
-                                                        BOOL fIsCritical,
-                                                        BOOL fIsTreatAsSafe);
-
-        static void FireMethodTransparencyComputationStart(LPCWSTR wszMethodName,
-                                                           LPCWSTR wszModuleName,
-                                                           DWORD dwAppDomain);
-        static void FireMethodTransparencyComputationEnd(LPCWSTR wszMethodName,
-                                                         LPCWSTR wszModuleName,
-                                                         DWORD dwAppDomain,
-                                                         BOOL fIsCritical,
-                                                         BOOL fIsTreatAsSafe);
-
-        static void FireModuleTransparencyComputationStart(LPCWSTR wszModuleName, DWORD dwAppDomain);
-        static void FireModuleTransparencyComputationEnd(LPCWSTR wszModuleName,
-                                                         DWORD dwAppDomain,
-                                                         BOOL fIsAllCritical,
-                                                         BOOL fIsAllTransparent,
-                                                         BOOL fIsTreatAsSafe,
-                                                         BOOL fIsOpportunisticallyCritical,
-                                                         DWORD dwSecurityRuleSet);
-
-        static void FireTokenTransparencyComputationStart(DWORD dwToken,
-                                                          LPCWSTR wszModuleName,
-                                                          DWORD dwAppDomain);
-        static void FireTokenTransparencyComputationEnd(DWORD dwToken,
-                                                        LPCWSTR wszModuleName,
-                                                        DWORD dwAppDomain,
-                                                        BOOL fIsCritical,
-                                                        BOOL fIsTreatAsSafe);
-
-        static void FireTypeTransparencyComputationStart(LPCWSTR wszTypeName,
-                                                         LPCWSTR wszModuleName,
-                                                         DWORD dwAppDomain);
-        static void FireTypeTransparencyComputationEnd(LPCWSTR wszTypeName,
-                                                       LPCWSTR wszModuleName,
-                                                       DWORD dwAppDomain,
-                                                       BOOL fIsAllCritical,
-                                                       BOOL fIsAllTransparent,
-                                                       BOOL fIsCritical,
-                                                       BOOL fIsTreatAsSafe);
-#else
-    public:
-        static VOID StrongNameVerificationStart(DWORD dwInFlags, _In_z_ LPWSTR strFullyQualifiedAssemblyName) {};
-        static VOID StrongNameVerificationStop(DWORD dwInFlags,ULONG result, _In_z_ LPWSTR strFullyQualifiedAssemblyName) {};
-
-        static void FireFieldTransparencyComputationStart(LPCWSTR wszFieldName,
-                                                          LPCWSTR wszModuleName,
-                                                          DWORD dwAppDomain) {};
-        static void FireFieldTransparencyComputationEnd(LPCWSTR wszFieldName,
-                                                        LPCWSTR wszModuleName,
-                                                        DWORD dwAppDomain,
-                                                        BOOL fIsCritical,
-                                                        BOOL fIsTreatAsSafe) {};
-
-        static void FireMethodTransparencyComputationStart(LPCWSTR wszMethodName,
-                                                           LPCWSTR wszModuleName,
-                                                           DWORD dwAppDomain) {};
-        static void FireMethodTransparencyComputationEnd(LPCWSTR wszMethodName,
-                                                         LPCWSTR wszModuleName,
-                                                         DWORD dwAppDomain,
-                                                         BOOL fIsCritical,
-                                                         BOOL fIsTreatAsSafe) {};
-
-        static void FireModuleTransparencyComputationStart(LPCWSTR wszModuleName, DWORD dwAppDomain) {};
-        static void FireModuleTransparencyComputationEnd(LPCWSTR wszModuleName,
-                                                         DWORD dwAppDomain,
-                                                         BOOL fIsAllCritical,
-                                                         BOOL fIsAllTransparent,
-                                                         BOOL fIsTreatAsSafe,
-                                                         BOOL fIsOpportunisticallyCritical,
-                                                         DWORD dwSecurityRuleSet) {};
-
-        static void FireTokenTransparencyComputationStart(DWORD dwToken,
-                                                          LPCWSTR wszModuleName,
-                                                          DWORD dwAppDomain) {};
-        static void FireTokenTransparencyComputationEnd(DWORD dwToken,
-                                                        LPCWSTR wszModuleName,
-                                                        DWORD dwAppDomain,
-                                                        BOOL fIsCritical,
-                                                        BOOL fIsTreatAsSafe) {};
-
-        static void FireTypeTransparencyComputationStart(LPCWSTR wszTypeName,
-                                                         LPCWSTR wszModuleName,
-                                                         DWORD dwAppDomain) {};
-        static void FireTypeTransparencyComputationEnd(LPCWSTR wszTypeName,
-                                                       LPCWSTR wszModuleName,
-                                                       DWORD dwAppDomain,
-                                                       BOOL fIsAllCritical,
-                                                       BOOL fIsAllTransparent,
-                                                       BOOL fIsCritical,
-                                                       BOOL fIsTreatAsSafe) {};
-#endif // FEATURE_EVENT_TRACE
-    };
-
-    // Class to wrap all Binder logic for ETW
-    class BinderLog
-    {
-    public:
-        typedef union _BinderStructs {
-            typedef  enum _NGENBINDREJECT_REASON {
-                NGEN_BIND_START_BIND = 0,
-                NGEN_BIND_NO_INDEX = 1,
-                NGEN_BIND_SYSTEM_ASSEMBLY_NOT_AVAILABLE = 2,
-                NGEN_BIND_NO_NATIVE_IMAGE = 3,
-                NGEN_BIND_REJECT_CONFIG_MASK = 4,
-                NGEN_BIND_FAIL = 5,
-                NGEN_BIND_INDEX_CORRUPTION = 6,
-                NGEN_BIND_REJECT_TIMESTAMP = 7,
-                NGEN_BIND_REJECT_NATIVEIMAGE_NOT_FOUND = 8,
-                NGEN_BIND_REJECT_IL_SIG = 9,
-                NGEN_BIND_REJECT_LOADER_EVAL_FAIL = 10,
-                NGEN_BIND_MISSING_FOUND = 11,
-                NGEN_BIND_REJECT_HOSTASM = 12,
-                NGEN_BIND_REJECT_IL_NOT_FOUND = 13,
-                NGEN_BIND_REJECT_APPBASE_NOT_FILE = 14,
-                NGEN_BIND_BIND_DEPEND_REJECT_REF_DEF_MISMATCH = 15,
-                NGEN_BIND_BIND_DEPEND_REJECT_NGEN_SIG = 16,
-                NGEN_BIND_APPLY_EXTERNAL_RELOCS_FAILED = 17,
-                NGEN_BIND_SYSTEM_ASSEMBLY_NATIVEIMAGE_NOT_AVAILABLE = 18,
-                NGEN_BIND_ASSEMBLY_HAS_DIFFERENT_GRANT = 19,
-                NGEN_BIND_ASSEMBLY_NOT_DOMAIN_NEUTRAL = 20,
-                NGEN_BIND_NATIVEIMAGE_VERSION_MISMATCH = 21,
-                NGEN_BIND_LOADFROM_NOT_ALLOWED = 22,
-                NGEN_BIND_DEPENDENCY_HAS_DIFFERENT_IDENTITY = 23
-            } NGENBINDREJECT_REASON;
-        } BinderStructs;
     };
 
     // Class to wrap all Exception logic for ETW
@@ -1323,26 +1185,24 @@ namespace ETW
 #define ETW_IS_TRACE_ON(level) ( FALSE ) // for fusion which is eventually going to get removed
 #define ETW_IS_FLAG_ON(flag) ( FALSE ) // for fusion which is eventually going to get removed
 
-// Commonly used constats for ETW Assembly Loader and Assembly Binder events.
-#define ETWLoadContextNotAvailable (LOADCTX_TYPE_HOSTED + 1)
-#define ETWAppDomainIdNotAvailable 0 // Valid AppDomain IDs start from 1
-
 #define ETWFieldUnused 0 // Indicates that a particular field in the ETW event payload template is currently unused.
 
 #define ETWLoaderLoadTypeNotAvailable 0 // Static or Dynamic Load is only valid at LoaderPhaseStart and LoaderPhaseEnd events - for other events, 0 indicates "not available"
 #define ETWLoaderStaticLoad 0 // Static reference load
 #define ETWLoaderDynamicLoad 1 // Dynamic assembly load
 
+#if defined (FEATURE_EVENT_TRACE)
+EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context;
+EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_DOTNET_Context;
+EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_DOTNET_Context;
+EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_DOTNET_Context;
+#endif // FEATURE_EVENT_TRACE
+
 #if defined(FEATURE_EVENT_TRACE) && !defined(HOST_UNIX)
 //
 // The ONE and only ONE global instantiation of this class
 //
 extern ETW::CEtwTracer *  g_pEtwTracer;
-
-EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context;
-EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_DOTNET_Context;
-EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_DOTNET_Context;
-EXTERN_C DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_DOTNET_Context;
 
 //
 // Special Handling of Startup events

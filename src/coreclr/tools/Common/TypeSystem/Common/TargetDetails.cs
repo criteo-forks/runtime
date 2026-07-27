@@ -22,8 +22,10 @@ namespace Internal.TypeSystem
         tvOSSimulator,
         FreeBSD,
         NetBSD,
+        OpenBSD,
         SunOS,
-        WebAssembly
+        Browser,
+        Wasi
     }
 
     public enum TargetAbi
@@ -177,10 +179,10 @@ namespace Internal.TypeSystem
                 switch (Architecture)
                 {
                     case TargetArchitecture.ARM:
+                    case TargetArchitecture.RiscV64:
                         return 2;
                     case TargetArchitecture.ARM64:
                     case TargetArchitecture.LoongArch64:
-                    case TargetArchitecture.RiscV64:
                         return 4;
                     default:
                         return 1;
@@ -296,6 +298,17 @@ namespace Internal.TypeSystem
         }
 
         /// <summary>
+        /// Returns True if compiling for WebAssembly (Wasm32 or Wasm64)
+        /// </summary>
+        public bool IsWasm
+        {
+            get
+            {
+                return Architecture == TargetArchitecture.Wasm32;
+            }
+        }
+
+        /// <summary>
         /// Returns True if compiling for Windows
         /// </summary>
         public bool IsWindows
@@ -348,5 +361,17 @@ namespace Internal.TypeSystem
         /// CodeDelta - encapsulate the fact that ARM requires a thumb bit
         /// </summary>
         public int CodeDelta { get => (Architecture == TargetArchitecture.ARM) ? 1 : 0; }
+
+        /// <summary>
+        /// Encapsulates the fact that some architectures require 8-byte (larger than pointer
+        /// size) alignment on some value types and arrays.
+        /// </summary>
+        public bool SupportsAlign8
+        {
+            get
+            {
+                return Architecture is TargetArchitecture.ARM or TargetArchitecture.Wasm32;
+            }
+        }
     }
 }

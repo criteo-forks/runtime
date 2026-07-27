@@ -98,7 +98,8 @@ instrDesc* emitNewInstrCallDir(int              argCnt,
                                regMaskTP        gcrefRegs,
                                regMaskTP        byrefRegs,
                                emitAttr         retSize,
-                               emitAttr         secondRetSize);
+                               emitAttr         secondRetSize,
+                               bool             hasAsyncRet);
 
 instrDesc* emitNewInstrCallInd(int              argCnt,
                                ssize_t          disp,
@@ -106,7 +107,8 @@ instrDesc* emitNewInstrCallInd(int              argCnt,
                                regMaskTP        gcrefRegs,
                                regMaskTP        byrefRegs,
                                emitAttr         retSize,
-                               emitAttr         secondRetSize);
+                               emitAttr         secondRetSize,
+                               bool             hasAsyncRet);
 
 /************************************************************************/
 /*   enum to allow instruction optimisation to specify register order   */
@@ -194,6 +196,10 @@ FORCEINLINE bool OptimizeLdrStr(instruction ins,
                                 int         offs     = -1 DEBUG_ARG(bool useRsvdReg = false));
 
 bool OptimizePostIndexed(instruction ins, regNumber reg, ssize_t imm, emitAttr regAttr);
+
+// Try to fold the page offset of a preceding relocatable "add Rd,Rd,#:lo12:sym" (PAGEOFFSET_12A)
+// into a "ldr Rd,[Rd]" to form "ldr Rd,[Rd,#:lo12:sym]" (PAGEOFFSET_12L), removing the add.
+bool TryFoldPageOffsetIntoLdr(instruction ins, emitAttr attr, regNumber reg1, regNumber reg2);
 
 emitLclVarAddr* emitGetLclVarPairLclVar2(instrDesc* id)
 {
@@ -552,6 +558,9 @@ static code_t insEncodeReg3Scale(bool isScaled);
 
 // Returns the encoding to select the 1/2/4/8 byte elemsize for an Arm64 SVE vector instruction
 static code_t insEncodeSveElemsize(emitAttr size);
+
+// Returns the encoding to select the 1/2/4 byte elemsize for an Arm64 Sve narrowing vector instruction
+static code_t insEncodeNarrowingSveElemsize(emitAttr size);
 
 // Returns the encoding to select the 1/2/4/8 byte elemsize for an Arm64 Sve vector instruction
 // This specifically encodes the size at bit locations '22-21'.
@@ -1419,6 +1428,26 @@ inline static bool insScalableOptsWithVectorLength(insScalableOpts sopt)
     return ((sopt == INS_SCALABLE_OPTS_VL_2X) || (sopt == INS_SCALABLE_OPTS_VL_4X));
 }
 
+inline static bool insSveMovOptsUnpredicated(insSveMovOpts mopt)
+{
+    return mopt == INS_SVE_MOV_OPTS_UNPRED;
+}
+
+inline static bool isValidMovprfxReg(insSveMovOpts mopt,
+                                     regNumber     dstReg,
+                                     regNumber     srcReg,
+                                     regNumber     op2Reg = REG_NA,
+                                     regNumber     op3Reg = REG_NA,
+                                     regNumber     op4Reg = REG_NA)
+{
+    if (insSveMovOptsUnpredicated(mopt) && (dstReg == srcReg))
+    {
+        // movprfx is skipped, so assume valid.
+        return true;
+    }
+    return (dstReg != op2Reg) && (dstReg != op3Reg) && (dstReg != op4Reg);
+}
+
 static bool isValidImmCond(ssize_t imm);
 static bool isValidImmCondFlags(ssize_t imm);
 static bool isValidImmCondFlagsImm5(ssize_t imm);
@@ -1433,7 +1462,7 @@ inline static ssize_t computeRelPageAddr(size_t dstAddr, size_t srcAddr)
 /*                   Output target-independent instructions             */
 /************************************************************************/
 
-void emitIns_J(instruction ins, BasicBlock* dst, int instrCount = 0);
+void emitIns_J(instruction ins, BasicBlock* dst, bool keepShort = false);
 
 /************************************************************************/
 /*           The public entry points to output instructions             */
@@ -1475,6 +1504,15 @@ void emitInsSve_R_F(instruction ins, emitAttr attr, regNumber reg, double immDbl
 
 void emitIns_Mov(
     instruction ins, emitAttr attr, regNumber dstReg, regNumber srcReg, bool canSkip, insOpts opt = INS_OPTS_NONE);
+
+void emitInsSve_Mov(instruction   ins,
+                    emitAttr      attr,
+                    regNumber     dstReg,
+                    regNumber     srcReg,
+                    bool          canSkip,
+                    insOpts       opt    = INS_OPTS_NONE,
+                    insSveMovOpts mopt   = INS_SVE_MOV_OPTS_UNPRED,
+                    regNumber     mskReg = REG_NA);
 
 void emitIns_R_R(instruction     ins,
                  emitAttr        attr,
@@ -1545,7 +1583,8 @@ void emitInsSve_R_R_R(instruction     ins,
                       regNumber       reg2,
                       regNumber       reg3,
                       insOpts         opt  = INS_OPTS_NONE,
-                      insScalableOpts sopt = INS_SCALABLE_OPTS_NONE);
+                      insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                      insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
 
 void emitIns_R_R_R_I(instruction     ins,
                      emitAttr        attr,
@@ -1564,7 +1603,8 @@ void emitInsSve_R_R_R_I(instruction     ins,
                         regNumber       reg3,
                         ssize_t         imm,
                         insOpts         opt  = INS_OPTS_NONE,
-                        insScalableOpts sopt = INS_SCALABLE_OPTS_NONE);
+                        insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                        insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
 
 void emitIns_R_R_R_I_I(instruction ins,
                        emitAttr    attr,
@@ -1592,8 +1632,13 @@ void emitIns_R_R_R_Ext(instruction ins,
                        insOpts     opt         = INS_OPTS_NONE,
                        int         shiftAmount = -1);
 
-void emitIns_R_R_I_I(
-    instruction ins, emitAttr attr, regNumber reg1, regNumber reg2, int imm1, int imm2, insOpts opt = INS_OPTS_NONE);
+void emitIns_R_R_I_I(instruction ins,
+                     emitAttr    attr,
+                     regNumber   reg1,
+                     regNumber   reg2,
+                     ssize_t     imm1,
+                     ssize_t     imm2,
+                     insOpts     opt = INS_OPTS_NONE);
 
 void emitIns_R_R_R_R(instruction     ins,
                      emitAttr        attr,
@@ -1611,7 +1656,8 @@ void emitInsSve_R_R_R_R(instruction     ins,
                         regNumber       reg3,
                         regNumber       reg4,
                         insOpts         opt  = INS_OPTS_NONE,
-                        insScalableOpts sopt = INS_SCALABLE_OPTS_NONE);
+                        insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                        insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
 
 void emitIns_R_R_R_R_I(instruction ins,
                        emitAttr    attr,
@@ -1622,14 +1668,51 @@ void emitIns_R_R_R_R_I(instruction ins,
                        ssize_t     imm,
                        insOpts     opt = INS_OPTS_NONE);
 
-void emitInsSve_R_R_R_R_I(instruction ins,
-                          emitAttr    attr,
-                          regNumber   reg1,
-                          regNumber   reg2,
-                          regNumber   reg3,
-                          regNumber   reg4,
-                          ssize_t     imm,
-                          insOpts     opt = INS_OPTS_NONE);
+void emitInsSve_R_R_R_R_I(instruction     ins,
+                          emitAttr        attr,
+                          regNumber       reg1,
+                          regNumber       reg2,
+                          regNumber       reg3,
+                          regNumber       reg4,
+                          ssize_t         imm,
+                          insOpts         opt  = INS_OPTS_NONE,
+                          insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                          insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
+
+void emitInsSve_R_R_R_R_I_I(instruction     ins,
+                            emitAttr        attr,
+                            regNumber       reg1,
+                            regNumber       reg2,
+                            regNumber       reg3,
+                            regNumber       reg4,
+                            ssize_t         imm1,
+                            ssize_t         imm2,
+                            insOpts         opt  = INS_OPTS_NONE,
+                            insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                            insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
+
+void emitInsSve_R_R_R_R_R(instruction     ins,
+                          emitAttr        attr,
+                          regNumber       reg1,
+                          regNumber       reg2,
+                          regNumber       reg3,
+                          regNumber       reg4,
+                          regNumber       reg5,
+                          insOpts         opt  = INS_OPTS_NONE,
+                          insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                          insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
+
+void emitInsSve_R_R_R_R_R_I(instruction     ins,
+                            emitAttr        attr,
+                            regNumber       reg1,
+                            regNumber       reg2,
+                            regNumber       reg3,
+                            regNumber       reg4,
+                            regNumber       reg5,
+                            ssize_t         imm,
+                            insOpts         opt  = INS_OPTS_NONE,
+                            insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                            insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
 
 void emitIns_R_COND(instruction ins, emitAttr attr, regNumber reg, insCond cond);
 
@@ -1647,6 +1730,16 @@ void emitIns_R_PATTERN(
 
 void emitIns_R_PATTERN_I(
     instruction ins, emitAttr attr, regNumber reg1, insSvePattern pattern, ssize_t imm, insOpts opt = INS_OPTS_NONE);
+
+void emitIns_R_R_PATTERN_I(instruction     ins,
+                           emitAttr        attr,
+                           regNumber       reg1,
+                           regNumber       reg2,
+                           insSvePattern   pattern,
+                           ssize_t         imm,
+                           insOpts         opt  = INS_OPTS_NONE,
+                           insScalableOpts sopt = INS_SCALABLE_OPTS_NONE,
+                           insSveMovOpts   mopt = INS_SVE_MOV_OPTS_UNPRED);
 
 void emitIns_PRFOP_R_R_R(instruction     ins,
                          emitAttr        attr,
@@ -1704,6 +1797,7 @@ void emitIns_C_R(instruction ins, emitAttr attr, CORINFO_FIELD_HANDLE fldHnd, re
 void emitIns_C_I(instruction ins, emitAttr attr, CORINFO_FIELD_HANDLE fdlHnd, ssize_t offs, ssize_t val);
 
 void emitIns_R_L(instruction ins, emitAttr attr, BasicBlock* dst, regNumber reg);
+void emitIns_R_L(instruction ins, emitAttr attr, insGroup* dst, regNumber reg);
 
 void emitIns_R_D(instruction ins, emitAttr attr, unsigned offs, regNumber reg);
 
@@ -1733,31 +1827,6 @@ void emitIns_ARR_R(instruction ins, emitAttr attr, regNumber ireg, regNumber reg
 
 void emitIns_R_ARX(
     instruction ins, emitAttr attr, regNumber ireg, regNumber reg, regNumber rg2, unsigned mul, int disp);
-
-enum EmitCallType
-{
-    EC_FUNC_TOKEN, // Direct call to a helper/static/nonvirtual/global method
-    EC_INDIR_R,    // Indirect call via register
-    EC_COUNT
-};
-
-void emitIns_Call(EmitCallType          callType,
-                  CORINFO_METHOD_HANDLE methHnd,
-                  INDEBUG_LDISASM_COMMA(CORINFO_SIG_INFO* sigInfo) // used to report call sites to the EE
-                  void*            addr,
-                  ssize_t          argSize,
-                  emitAttr         retSize,
-                  emitAttr         secondRetSize,
-                  VARSET_VALARG_TP ptrVars,
-                  regMaskTP        gcrefRegs,
-                  regMaskTP        byrefRegs,
-                  const DebugInfo& di,
-                  regNumber        ireg,
-                  regNumber        xreg,
-                  unsigned         xmul,
-                  ssize_t          disp,
-                  bool             isJump,
-                  bool             noSafePoint = false);
 
 BYTE*    emitOutputLJ(insGroup* ig, BYTE* dst, instrDesc* i);
 unsigned emitOutputCall(insGroup* ig, BYTE* dst, instrDesc* i, code_t code);
