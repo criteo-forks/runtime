@@ -196,7 +196,7 @@ bool Lowering::IsContainableUnaryOrBinaryOp(GenTree* parentNode, GenTree* childN
     if (parentNode->isContained())
         return false;
 
-    if (!varTypeIsIntegral(parentNode))
+    if (!varTypeIsIntegral(parentNode) && !parentNode->TypeIs(TYP_BYREF))
         return false;
 
     if (parentNode->gtGetOp1()->isContained() || (parentNode->OperIsBinary() && parentNode->gtGetOp2()->isContained()))
@@ -989,6 +989,16 @@ void Lowering::LowerModPow2(GenTree* node)
 //
 GenTree* Lowering::LowerCnsMask(GenTreeMskCon* mask)
 {
+    // For !JitUseScalableVectorT, we need to ensure the mask can be encoded as ptrue/pfalse.
+    // For JitUseScalableVectorT, constant masks use the gtSimdScalableMaskVal encoding, so are always valid.
+
+#if defined(DEBUG)
+    if (JitConfig.JitUseScalableVectorT())
+    {
+        return mask->gtNext;
+    }
+#endif // DEBUG
+
     // Try every type until a match is found
 
     if (mask->IsZero())
@@ -1025,7 +1035,7 @@ GenTree* Lowering::LowerCnsMask(GenTreeMskCon* mask)
 
     // Create a vector constant
     GenTreeVecCon* vecCon = m_compiler->gtNewVconNode(TYP_SIMD16);
-    EvaluateSimdCvtMaskToVector<simd16_t>(TYP_BYTE, &vecCon->gtSimdVal, mask->gtSimdMaskVal);
+    EvaluateSimdCvtMaskToVector<simd16_t>(TYP_BYTE, &vecCon->gtSimd16Val, mask->gtSimdMaskVal);
     BlockRange().InsertBefore(mask, vecCon);
 
     // Convert the vector constant to a mask
@@ -1983,7 +1993,7 @@ GenTree* Lowering::LowerHWIntrinsic(GenTreeHWIntrinsic* node)
             var_types      selectType   = isMaskOp ? TYP_MASK : Compiler::getSIMDTypeForSize(node->GetSimdSize());
             NamedIntrinsic selectIntrin = isMaskOp ? NI_Sve_ConditionalSelect_Predicates : NI_Sve_ConditionalSelect;
 
-            GenTree* trueMask = m_compiler->gtNewSimdAllTrueMaskNode(node->GetSimdBaseType());
+            GenTree* trueMask = m_compiler->gtNewSimdTrueMaskNode(node->GetSimdBaseType());
             GenTree* falseVal = m_compiler->gtNewZeroConNode(selectType);
             BlockRange().InsertBefore(node, trueMask);
             BlockRange().InsertBefore(node, falseVal);
@@ -2419,6 +2429,11 @@ GenTree* Lowering::LowerHWIntrinsicDot(GenTreeHWIntrinsic* node)
     assert(simdSize != 0);
     assert(varTypeIsSIMD(node));
 
+    // Morph 'fgOptimizeHWIntrinsic' transforms 'Create(ToScalar(Dot(...' into 'Dot('...,
+    // so a DotProduct not consumed as a scalar value needs an explicit broadcast
+    LIR::Use use;
+    bool     needsBroadcast = BlockRange().TryGetUse(node, &use) && !use.User()->OperIsHWIntrinsic(NI_Vector_ToScalar);
+
     GenTree* op1 = node->Op(1);
     GenTree* op2 = node->Op(2);
 
@@ -2631,12 +2646,25 @@ GenTree* Lowering::LowerHWIntrinsicDot(GenTreeHWIntrinsic* node)
                                                         simdSize);
             BlockRange().InsertAfter(tmp1, tmp2);
             LowerNode(tmp2);
+
+            if (needsBroadcast)
+            {
+                // Broadcast the AddAcross result from element 0 to every element of the vector.
+                idx = m_compiler->gtNewIconNode(0);
+                BlockRange().InsertAfter(tmp2, idx);
+
+                NamedIntrinsic duplicate = (simdSize == 8) ? NI_AdvSimd_DuplicateSelectedScalarToVector64
+                                                           : NI_AdvSimd_DuplicateSelectedScalarToVector128;
+
+                tmp2 = m_compiler->gtNewSimdHWIntrinsicNode(simdType, tmp2, idx, duplicate, simdBaseType,
+                                                            genTypeSize(tmp2->TypeGet()));
+                BlockRange().InsertAfter(idx, tmp2);
+                LowerNode(tmp2);
+            }
         }
     }
 
     // We're producing a vector result, so just return the result directly
-    LIR::Use use;
-
     if (BlockRange().TryGetUse(node, &use))
     {
         use.ReplaceWith(tmp2);
