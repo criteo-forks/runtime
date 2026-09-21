@@ -445,6 +445,20 @@ VOID ETW::GCLog::ForceGC(LONGLONG l64ClientSequenceNumber)
 
     InterlockedExchange64(&s_l64LastClientSequenceNumber, l64ClientSequenceNumber);
 
+#ifndef FEATURE_NATIVEAOT
+    // If this forced GC is going to be walked for a heap dump, make sure the walk can
+    // describe the types it reports. See ETW::TypeSystemLog::OnHeapDumpStart: without
+    // this, a second (and every later) dump taken while another EventPipe session keeps
+    // the Types keyword enabled emits nodes and edges with no BulkType events to resolve
+    // them, and the consumer sees nothing but unknown types.
+    if (ETW_TRACING_CATEGORY_ENABLED(MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context,
+                                     TRACE_LEVEL_INFORMATION,
+                                     CLR_GCHEAPDUMP_KEYWORD))
+    {
+        ETW::TypeSystemLog::OnHeapDumpStart();
+    }
+#endif // FEATURE_NATIVEAOT
+
 #if defined(TARGET_BROWSER)
     // On single-threaded browser, we cannot call ForceGCForDiagnostics synchronously
     // from within the provider callback (which runs during ep_init_session_3 under the
