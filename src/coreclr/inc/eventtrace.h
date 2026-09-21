@@ -169,6 +169,7 @@ namespace ETW
         static VOID LogTypeAndParametersIfNecessary(BulkTypeEventLogger * pBulkTypeEventLogger, ULONGLONG thAsAddr, TypeLogBehavior typeLogBehavior);
         static VOID OnModuleUnload(Module * pModule);
         static void OnKeywordsChanged();
+        static void OnHeapDumpStart();
         static void Cleanup();
         static VOID DeleteTypeHashNoLock(AllLoggedTypes **ppAllLoggedTypes);
         static VOID FlushObjectAllocationEvents();

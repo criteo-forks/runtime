@@ -884,6 +884,51 @@ void ETW::TypeSystemLog::OnKeywordsChanged()
         OnTypesKeywordTurnedOff();
 }
 
+//---------------------------------------------------------------------------------------
+//
+// Called just before a GC heap dump induced by the GCHeapCollect keyword, to drop the
+// record of which types have already been described.
+//
+// A heap dump has to be self-describing: the GCBulkNode / GCBulkEdge events it emits
+// carry raw type IDs (MethodTable addresses), which are only usable by a consumer that
+// also receives a BulkType event mapping those IDs to names. We log a given type at most
+// once, and that bookkeeping (s_pAllLoggedTypes) is process-wide rather than per session.
+// It is otherwise cleared only when CLR_TYPE_KEYWORD goes off across *every* session --
+// see OnKeywordsChanged above, which can only observe the aggregate keyword state.
+//
+// So a long-lived session that keeps the Types keyword enabled suppresses the type events
+// for every heap dump after the first one. The dump still streams its nodes and edges, but
+// the consumer has nothing to resolve the type IDs against and reports every object as an
+// unknown type. Dropping the table here means the walk that follows re-logs each type it
+// encounters exactly once, which is what the dump needs and no more.
+//
+// Re-logging a type that some other session has already seen is harmless: BulkType is
+// idempotent from a consumer's point of view, it just refreshes an ID -> name mapping.
+//
+
+// static
+void ETW::TypeSystemLog::OnHeapDumpStart()
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        GC_NOTRIGGER;
+        MODE_ANY;
+        CAN_TAKE_LOCK;
+    }
+    CONTRACTL_END;
+
+    // If nobody is listening for type events there is nothing to re-log, and clearing the
+    // table would only throw away the allocation sampling statistics it also holds.
+    if (!ETW_TRACING_CATEGORY_ENABLED(MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context, TRACE_LEVEL_INFORMATION, CLR_TYPE_KEYWORD))
+        return;
+
+    // Despite the name, this just discards the "already logged" hash, which is exactly
+    // what we want here. Called on the provider callback thread, the same context from
+    // which OnKeywordsChanged already invokes it.
+    OnTypesKeywordTurnedOff();
+}
+
 
 //---------------------------------------------------------------------------------------
 //
